@@ -33,9 +33,13 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final TextEditingController _controller = TextEditingController();
   String _displayText = '请输入内容...';
-  Database? _lemmaDb;      // 词根库
-  Database? _dictDb;       // 释义库 stardict.db
+  Database? _lemmaDb;
+  Database? _dictDb;
   bool _isLoading = true;
+
+  // 🔥 新增：候选词列表 & 当前选中词
+  List<String> _chips = [];
+  String? _selectedWord;
 
   @override
   void initState() {
@@ -43,14 +47,14 @@ class _HomePageState extends State<HomePage> {
     _initDatabases();
   }
 
-  /// 从 assets 拷贝数据库文件到文档目录（若不存在）
   Future<void> _copyFromAssets(String assetPath, String dbPath) async {
     final dbDir = Directory(dirname(dbPath));
     if (!await dbDir.exists()) {
       await dbDir.create(recursive: true);
     }
     final data = await rootBundle.load(assetPath);
-    final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    final bytes =
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
     await File(dbPath).writeAsBytes(bytes);
   }
 
@@ -58,15 +62,14 @@ class _HomePageState extends State<HomePage> {
     try {
       final appDocDir = await getApplicationDocumentsDirectory();
 
-      // ---- 词根库 lemma.en.db ----
+      // ---- 词根库 ----
       final lemmaPath = join(appDocDir.path, 'lemma.en.db');
-      debugPrint('📁 词根库路径: $lemmaPath');
       if (!await File(lemmaPath).exists()) {
         try {
           await _copyFromAssets('assets/lemma.en.db', lemmaPath);
         } catch (e) {
           setState(() {
-            _displayText = '❌ 未找到 assets/lemma.en.db，请在 pubspec.yaml 中声明';
+            _displayText = '❌ 未找到 assets/lemma.en.db';
             _isLoading = false;
           });
           return;
@@ -82,15 +85,14 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
-      // ---- 释义库 stardict.db（同目录）----
+      // ---- 释义库 ----
       final dictPath = join(appDocDir.path, 'stardict.db');
-      debugPrint('📁 释义库路径: $dictPath');
       if (!await File(dictPath).exists()) {
         try {
           await _copyFromAssets('assets/stardict.db', dictPath);
         } catch (e) {
           setState(() {
-            _displayText = '❌ 未找到 assets/stardict.db，请在 pubspec.yaml 中声明';
+            _displayText = '❌ 未找到 assets/stardict.db';
             _isLoading = false;
           });
           return;
@@ -115,7 +117,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// 在释义库中查询单词释义；查到返回记录列表，查不到返回 null
+  /// 查某词的释义；查不到返回 null
   Future<List<Map<String, Object?>>?> _queryTranslation(String word) async {
     if (_dictDb == null) return null;
     final results = await _dictDb!.query(
@@ -133,25 +135,16 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     if (word.isEmpty) {
-      setState(() => _displayText = '请输入内容...');
+      setState(() {
+        _displayText = '请输入内容...';
+        _chips = [];
+        _selectedWord = null;
+      });
       return;
     }
 
     try {
-      final buffer = StringBuffer();
-
-      // ① 先直接查原词的释义
-      final direct = await _queryTranslation(word);
-      if (direct != null) {
-        for (final row in direct) {
-          buffer.writeln(row['word']); // 词在上
-          buffer.writeln(row['translation']); // 释义在下
-        }
-        setState(() => _displayText = buffer.toString().trim());
-        return;
-      }
-
-      // ② 原词无释义 → 查所有原型（weight 降序）
+      // ① 取所有原型（weight 降序）
       final stemRows = await _lemmaDb!.query(
         'word_stem',
         columns: ['stem'],
@@ -159,30 +152,54 @@ class _HomePageState extends State<HomePage> {
         whereArgs: [word],
         orderBy: 'weight DESC',
       );
-
-      if (stemRows.isEmpty) {
-        setState(() => _displayText = '未找到释义或原型');
-        return;
-      }
-
       final stems = stemRows.map((row) => row['stem'] as String).toList();
 
-      // ③ 依次用原型查释义，查到即输出（原型在上，释义在下）
-      bool found = false;
-      for (final stem in stems) {
-        final trans = await _queryTranslation(stem);
-        if (trans != null) {
-          for (final row in trans) {
-            buffer.writeln(row['word']); // 释义对应的单词（这里是原型）
-            buffer.writeln(row['translation']);
-          }
-          found = true;
-        }
+      // ② 候选 = 原词 + 所有原型（去重）
+      final candidates = <String>[word, ...stems];
+      final unique = <String>[];
+      for (final c in candidates) {
+        if (!unique.contains(c)) unique.add(c);
       }
 
       setState(() {
-        _displayText = found ? buffer.toString().trim() : '未找到原型对应的释义';
+        _chips = unique;
+        _selectedWord = null;
       });
+
+      // ③ 默认选中第一个【有释义】的候选（优先原词）
+      for (final c in unique) {
+        final trans = await _queryTranslation(c);
+        if (trans != null) {
+          await _selectChip(c);
+          return;
+        }
+      }
+
+      // 全部都没有释义
+      setState(() {
+        _selectedWord = null;
+        _displayText = '未找到释义';
+      });
+    } catch (e) {
+      setState(() => _displayText = '查询出错: $e');
+    }
+  }
+
+  /// 🔥 选中某个候选词，显示它的释义
+  Future<void> _selectChip(String word) async {
+    setState(() => _selectedWord = word);
+    try {
+      final trans = await _queryTranslation(word);
+      if (trans == null) {
+        setState(() => _displayText = '「$word」没有释义');
+        return;
+      }
+      final buffer = StringBuffer();
+      for (final row in trans) {
+        buffer.writeln(row['word']); // 词在上
+        buffer.writeln(row['translation']); // 释义在下
+      }
+      setState(() => _displayText = buffer.toString().trim());
     } catch (e) {
       setState(() => _displayText = '查询出错: $e');
     }
@@ -202,8 +219,9 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         child: Column(
           children: [
+            // ---- 搜索框 ----
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: TextField(
                 controller: _controller,
                 onChanged: (value) => _search(value.trim()),
@@ -218,18 +236,64 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
+
+            // ---- 🔥 新增：候选词圆角矩形横排 ----
+            if (_chips.isNotEmpty)
+              SizedBox(
+                height: 48,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _chips.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final word = _chips[index];
+                    final selected = word == _selectedWord;
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => _selectChip(word),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? Colors.blue
+                              : Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          word,
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: selected ? Colors.white : Colors.blue,
+                            fontWeight: selected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+            // ---- 释义显示区（可滚动）----
             Expanded(
               child: Center(
                 child: _isLoading
                     ? const CircularProgressIndicator()
-                    : Text(
-                        _displayText,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 24,
-                          color: _displayText == '请输入内容...'
-                              ? Colors.grey
-                              : Colors.black87,
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          _displayText,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 24,
+                            color: _displayText == '请输入内容...'
+                                ? Colors.grey
+                                : Colors.black87,
+                          ),
                         ),
                       ),
               ),
