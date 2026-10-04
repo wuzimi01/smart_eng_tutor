@@ -1,10 +1,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../services/models.dart';
+import '../services/database_helper.dart';
+import '../services/ocr_service.dart';
+import '../services/word_lookup.dart';
+import '../services/ocr_flow.dart';
+import 'widgets/ocr_image_view.dart';
+import 'widgets/chip_list.dart';
 import 'package:image_picker/image_picker.dart';
-import '../models.dart';
-import '../database_helper.dart';
-import '../ocr_service.dart';
-import 'rotate_preview_page.dart';
+
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,7 +23,8 @@ class _HomePageState extends State<HomePage> {
   // 服务
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final OcrService _ocrService = OcrService();
-  final ImagePicker _picker = ImagePicker();
+  late final WordLookup _lookup = WordLookup(_dbHelper);
+  late final OcrFlow _ocrFlow = OcrFlow(_ocrService);
   final TextEditingController _controller = TextEditingController();
 
   String _displayText = '请输入内容...';
@@ -28,7 +33,6 @@ class _HomePageState extends State<HomePage> {
   String? _selectedWord;
 
   File? _imageFile;
-  int _quarterTurns = 0; // ← 新增：旋转转数
   Size _imageSize = Size.zero;
   List<OcrWord> _ocrWords = [];
   bool _isRecognizing = false;
@@ -75,91 +79,22 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _pickAndRecognize(ImageSource source) async {
+    setState(() => _isRecognizing = true);
     try {
-    final XFile? picked = await _picker.pickImage(
-      source: source,
-      imageQuality: 100,
-      maxWidth: 8192, // ← 新增：保证 OCR 用图分辨率
-    );
-    if (picked == null) return;
-
-    if (!mounted) return; // ← 加：pickImage 是 await，之后确认页面还在
-
-    // 旋转预览：返回 (原图, 转数)
-    final result = await Navigator.push<(File, int)>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => RotatePreviewPage(
-          sourceFile: File(picked.path),
-          ocrService: _ocrService,
-        ),
-      ),
-    );
-    if (result == null) return;
-    if (!mounted) return; // ← 加：push 也是 await，同样确认
-
-    final (file, turns) = result;
-
-      // setState(() {
-      //   _isRecognizing = true;
-      //   _imageFile = file;
-      //   _quarterTurns = turns;
-      //   _ocrWords = [];
-      //   _displayText = '🔍 正在识别图片中的文字...';
-      // });
-
-      // // 显示尺寸按旋转后计算
-      // final s = await _ocrService.readImageSize(file);
-      // _imageSize = turns.isOdd ? Size(s.height, s.width) : s;
-
-      // // OCR 使用预处理增强图（旋转 + 去红笔 + 二值化）
-      // final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
-      // final words = await _ocrService.recognize(prep.file);
-
-      // // 把增强图坐标系换算回"旋转后原图"坐标系
-      // setState(() {
-      //   _isRecognizing = false;
-      //   _ocrWords = words
-      //       .map((w) => OcrWord(
-      //             w.text,
-      //             Rect.fromLTRB(
-      //               w.rect.left,
-      //               w.rect.top,
-      //               w.rect.right,
-      //               w.rect.bottom,
-      //             ),
-      //           ))
-      //       .toList();
-      //   _displayText = words.isEmpty
-      //       ? '未识别到英文单词，请重试或检查图片清晰度'
-      //       : '点击图片上的单词进行查询（共 ${words.length} 个）';
-      // });
-
-    // 预处理（内部已按 turns 旋转 + 去红笔 + 二值化）
-    final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
-    final words = await _ocrService.recognize(prep.file);
-
-    final s = await _ocrService.readImageSize(prep.file); // 预处理图尺寸
-
-    setState(() {
-      _isRecognizing = false;
-      _imageFile = prep.file;
-      _quarterTurns = 0;                 // 图已转正，UI 不用再转
-      _imageSize = s;                    // 不再需要 turns.isOdd 宽高互换
-      _ocrWords = words
-          .map((w) => OcrWord(
-                w.text,
-                Rect.fromLTRB(
-                  w.rect.left, w.rect.top, w.rect.right, w.rect.bottom,
-                ),
-              ))
-          .toList();
-      _displayText = words.isEmpty
-          ? '未识别到英文单词，请重试或检查图片清晰度'
-          : '点击图片上的单词进行查询（共 ${words.length} 个）';
-    });
-//11111111111111111111111111
+      final r = await _ocrFlow.run(context, source);
+      if (!mounted) return;
+      setState(() => _isRecognizing = false);
+      if (r == null) return;
+      setState(() {
+        _imageFile = r.imageFile;
+        _imageSize = r.imageSize;
+        _ocrWords = r.words;
+        _displayText = r.words.isEmpty
+            ? '未识别到英文单词，请重试或检查图片清晰度'
+            : '点击图片上的单词进行查询（共 ${r.words.length} 个）';
+      });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isRecognizing = false;
         _displayText = '❌ OCR 识别失败: $e';
@@ -178,31 +113,13 @@ class _HomePageState extends State<HomePage> {
       });
       return;
     }
-
     try {
-      final stems = await _dbHelper.queryStems(word);
-      final candidates = <String>[word, ...stems];
-      final unique = <String>[];
-      for (final c in candidates) {
-        if (!unique.contains(c)) unique.add(c);
-      }
-
+      final r = await _lookup.search(word);
+      if (!mounted) return;
       setState(() {
-        _chips = unique;
-        _selectedWord = null;
-      });
-
-      for (final c in unique) {
-        final trans = await _dbHelper.queryTranslation(c);
-        if (trans != null) {
-          await _selectChip(c);
-          return;
-        }
-      }
-
-      setState(() {
-        _selectedWord = null;
-        _displayText = '未找到释义';
+        _chips = r.chips;
+        _selectedWord = r.selected;
+        _displayText = r.displayText;
       });
     } catch (e) {
       setState(() => _displayText = '查询出错: $e');
@@ -210,19 +127,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _selectChip(String word) async {
-    setState(() => _selectedWord = word);
     try {
-      final trans = await _dbHelper.queryTranslation(word);
-      if (trans == null) {
-        setState(() => _displayText = '「$word」没有释义');
-        return;
-      }
-      final buffer = StringBuffer();
-      for (final row in trans) {
-        buffer.writeln(row['word']);
-        buffer.writeln(row['translation']);
-      }
-      setState(() => _displayText = buffer.toString().trim());
+      final r = await _lookup.select(word);
+      if (!mounted) return;
+      setState(() {
+        _selectedWord = r.selected;
+        _displayText = r.displayText;
+      });
     } catch (e) {
       setState(() => _displayText = '查询出错: $e');
     }
@@ -265,44 +176,18 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           if (_chips.isNotEmpty)
-            SizedBox(
-              height: 48,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: _chips.length,
-                separatorBuilder: (_,_) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final word = _chips[index];
-                  final selected = word == _selectedWord;
-                  return InkWell(
-                    borderRadius: BorderRadius.circular(20),
-                    onTap: () => _selectChip(word),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? Colors.blue
-                            : Colors.blue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        word,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: selected ? Colors.white : Colors.blue,
-                          fontWeight:
-                              selected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
+            ChipList(
+              chips: _chips,
+              selectedWord: _selectedWord,
+              onSelect: _selectChip,
             ),
-          if (_isMobile && _imageFile != null) _buildImageWithWords(),
+          if (_isMobile && _imageFile != null)
+            OcrImageView(
+              imageFile: _imageFile!,
+              imageSize: _imageSize,
+              words: _ocrWords,
+              onWordTap: _onTapOcrWord,
+            ),
           Expanded(
             child: Center(
               child: _isLoading
@@ -358,86 +243,5 @@ class _HomePageState extends State<HomePage> {
       );
     }
     return Scaffold(body: body);
-  }
-
-  Widget _buildImageWithWords() {
-    return Expanded(
-      flex: 3,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (_imageSize == Size.zero) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final scaleX = constraints.maxWidth / _imageSize.width;
-            final scaleY = constraints.maxHeight / _imageSize.height;
-            final scale = scaleX < scaleY ? scaleX : scaleY;
-            final displayW = _imageSize.width * scale;
-            final displayH = _imageSize.height * scale;
-
-            return Center(
-              child: InteractiveViewer(
-                panEnabled: true,
-                scaleEnabled: true,
-                minScale: 1.0,
-                maxScale: 5.0,
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                child: SizedBox(
-                  width: displayW,
-                  height: displayH,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        // ← 改：原图 + RotatedBox，与 OCR 坐标系（旋转后空间）对齐
-                        child: RotatedBox(
-                          quarterTurns: _quarterTurns,
-                          child: Image.file(_imageFile!, fit: BoxFit.fill, filterQuality: FilterQuality.high),
-                        ),
-                      ),
-                      ..._ocrWords.map((w) {
-                        return Positioned(
-                          left: w.rect.left * scale,
-                          top: w.rect.top * scale,
-                          width: w.rect.width * scale,
-                          height: w.rect.height * scale,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: () => _onTapOcrWord(w.text),
-                              borderRadius: BorderRadius.circular(4),
-                              child: Container(
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                      color: Colors.blue.withValues(alpha: 0.6)),
-                                ),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    w.text,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.blue,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
   }
 }

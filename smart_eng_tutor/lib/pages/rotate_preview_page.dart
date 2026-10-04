@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../ocr_service.dart';
+import '../services/ocr_service.dart';
 
 class RotatePreviewPage extends StatefulWidget {
   final File sourceFile;
