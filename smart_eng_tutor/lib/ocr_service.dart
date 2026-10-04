@@ -1,25 +1,21 @@
-import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'dart:io';
-import 'package:flutter/painting.dart'; // Rect / Size / Paint
+import 'dart:ui' as ui;
+import 'package:flutter/painting.dart'; // Rect / Size
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:path/path.dart' show join;
-import 'package:path_provider/path_provider.dart';
-
+import 'image_processor.dart'; // PreprocessResult
 import 'models.dart';
 
 class OcrService {
   TextRecognizer? _recognizer;
+  final ImageProcessor _processor = ImageProcessor(); // ← 委托预处理
 
-  bool get isSupported => !(
-      // ML Kit 只在移动端可用
-      false);
+  bool get isSupported => true;
 
   void ensureInitialized() {
     _recognizer ??= TextRecognizer(script: TextRecognitionScript.latin);
   }
 
-  /// 识别图片，返回带坐标的单词列表
+  /// 识别图片，返回带坐标的单词列表（传入的是预处理增强图）
   Future<List<OcrWord>> recognize(File imageFile) async {
     ensureInitialized();
     final inputImage = InputImage.fromFilePath(imageFile.path);
@@ -27,10 +23,12 @@ class OcrService {
 
     final words = <OcrWord>[];
     final wordRegex = RegExp(r"^[A-Za-z'’-]+$");
+
     for (final block in result.blocks) {
       for (final line in block.lines) {
         for (final element in line.elements) {
           final bbox = element.boundingBox;
+
           final tokens = element.text
               .split(RegExp(r'[\s,.:;!?()"“”]+'))
               .where((t) => t.trim().isNotEmpty)
@@ -66,55 +64,18 @@ class OcrService {
     final bytes = await file.readAsBytes();
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
-    final size =
-        Size(frame.image.width.toDouble(), frame.image.height.toDouble());
+    final size = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
     frame.image.dispose();
     codec.dispose();
     return size;
   }
 
-  /// 像素级旋转图片（quarterTurns: 1=90°顺时针, 2=180°, 3=270°）
-  Future<File> rotateImage(File source, int quarterTurns) async {
-    final q = quarterTurns % 4;
-    if (q == 0) return source;
-
-    final bytes = await source.readAsBytes();
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final img = frame.image;
-
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    switch (q) {
-      case 1:
-        canvas.translate(img.height.toDouble(), 0);
-        canvas.rotate(math.pi / 2);
-        break;
-      case 2:
-        canvas.translate(img.width.toDouble(), img.height.toDouble());
-        canvas.rotate(math.pi);
-        break;
-      case 3:
-        canvas.translate(0, img.width.toDouble());
-        canvas.rotate(3 * math.pi / 2);
-        break;
-    }
-    canvas.drawImage(img, Offset.zero, Paint());
-    final picture = recorder.endRecording();
-
-    final newW = q.isOdd ? img.height : img.width;
-    final newH = q.isOdd ? img.width : img.height;
-    final out = await picture.toImage(newW, newH);
-    final data = await out.toByteData(format: ui.ImageByteFormat.png);
-
-    img.dispose();
-    codec.dispose();
-
-    final tempDir = await getTemporaryDirectory();
-    final file = File(join(
-        tempDir.path, 'rotated_${DateTime.now().millisecondsSinceEpoch}.png'));
-    await file.writeAsBytes(data!.buffer.asUint8List());
-    return file;
+  /// 预处理：委托给 ImageProcessor
+  Future<PreprocessResult> preprocessImage(
+    File source, {
+    int quarterTurns = 0,
+  }) {
+    return _processor.process(source, quarterTurns: quarterTurns);
   }
 
   void dispose() {

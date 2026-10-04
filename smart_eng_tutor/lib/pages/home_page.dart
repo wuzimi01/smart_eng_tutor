@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-
 import '../models.dart';
 import '../database_helper.dart';
 import '../ocr_service.dart';
@@ -21,15 +20,15 @@ class _HomePageState extends State<HomePage> {
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final OcrService _ocrService = OcrService();
   final ImagePicker _picker = ImagePicker();
-
   final TextEditingController _controller = TextEditingController();
+
   String _displayText = '请输入内容...';
   bool _isLoading = true;
-
   List<String> _chips = [];
   String? _selectedWord;
 
   File? _imageFile;
+  int _quarterTurns = 0; // ← 新增：旋转转数
   Size _imageSize = Size.zero;
   List<OcrWord> _ocrWords = [];
   bool _isRecognizing = false;
@@ -79,12 +78,13 @@ class _HomePageState extends State<HomePage> {
     try {
       final XFile? picked = await _picker.pickImage(
         source: source,
-        imageQuality: 90,
+        imageQuality: 100,
+        maxWidth: 8192, // ← 新增：保证 OCR 用图分辨率
       );
       if (picked == null) return;
 
-      // 旋转预览
-      final confirmed = await Navigator.push<File>(
+      // 旋转预览：返回 (原图, 转数)
+      final result = await Navigator.push<(File, int)>(
         context,
         MaterialPageRoute(
           builder: (_) => RotatePreviewPage(
@@ -93,25 +93,70 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
-      if (confirmed == null) return;
+      // if (result == null) return;
+      // final (file, turns) = result;
 
-      setState(() {
-        _isRecognizing = true;
-        _imageFile = confirmed;
-        _ocrWords = [];
-        _displayText = '🔍 正在识别图片中的文字...';
-      });
+      // setState(() {
+      //   _isRecognizing = true;
+      //   _imageFile = file;
+      //   _quarterTurns = turns;
+      //   _ocrWords = [];
+      //   _displayText = '🔍 正在识别图片中的文字...';
+      // });
 
-      _imageSize = await _ocrService.readImageSize(confirmed);
-      final words = await _ocrService.recognize(confirmed);
+      // // 显示尺寸按旋转后计算
+      // final s = await _ocrService.readImageSize(file);
+      // _imageSize = turns.isOdd ? Size(s.height, s.width) : s;
 
-      setState(() {
-        _isRecognizing = false;
-        _ocrWords = words;
-        _displayText = words.isEmpty
-            ? '未识别到英文单词，请重试或检查图片清晰度'
-            : '点击图片上的单词进行查询（共 ${words.length} 个）';
-      });
+      // // OCR 使用预处理增强图（旋转 + 去红笔 + 二值化）
+      // final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
+      // final words = await _ocrService.recognize(prep.file);
+
+      // // 把增强图坐标系换算回"旋转后原图"坐标系
+      // setState(() {
+      //   _isRecognizing = false;
+      //   _ocrWords = words
+      //       .map((w) => OcrWord(
+      //             w.text,
+      //             Rect.fromLTRB(
+      //               w.rect.left,
+      //               w.rect.top,
+      //               w.rect.right,
+      //               w.rect.bottom,
+      //             ),
+      //           ))
+      //       .toList();
+      //   _displayText = words.isEmpty
+      //       ? '未识别到英文单词，请重试或检查图片清晰度'
+      //       : '点击图片上的单词进行查询（共 ${words.length} 个）';
+      // });
+    if (result == null) return;
+    final (file, turns) = result;
+
+    // 预处理（内部已按 turns 旋转 + 去红笔 + 二值化）
+    final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
+    final words = await _ocrService.recognize(prep.file);
+
+    final s = await _ocrService.readImageSize(prep.file); // 预处理图尺寸
+
+    setState(() {
+      _isRecognizing = false;
+      _imageFile = prep.file;
+      _quarterTurns = 0;                 // 图已转正，UI 不用再转
+      _imageSize = s;                    // 不再需要 turns.isOdd 宽高互换
+      _ocrWords = words
+          .map((w) => OcrWord(
+                w.text,
+                Rect.fromLTRB(
+                  w.rect.left, w.rect.top, w.rect.right, w.rect.bottom,
+                ),
+              ))
+          .toList();
+      _displayText = words.isEmpty
+          ? '未识别到英文单词，请重试或检查图片清晰度'
+          : '点击图片上的单词进行查询（共 ${words.length} 个）';
+    });
+//11111111111111111111111111
     } catch (e) {
       setState(() {
         _isRecognizing = false;
@@ -134,7 +179,6 @@ class _HomePageState extends State<HomePage> {
 
     try {
       final stems = await _dbHelper.queryStems(word);
-
       final candidates = <String>[word, ...stems];
       final unique = <String>[];
       for (final c in candidates) {
@@ -218,7 +262,6 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
-
           if (_chips.isNotEmpty)
             SizedBox(
               height: 48,
@@ -257,9 +300,7 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
             ),
-
           if (_isMobile && _imageFile != null) _buildImageWithWords(),
-
           Expanded(
             child: Center(
               child: _isLoading
@@ -314,7 +355,6 @@ class _HomePageState extends State<HomePage> {
         body: body,
       );
     }
-
     return Scaffold(body: body);
   }
 
@@ -347,7 +387,11 @@ class _HomePageState extends State<HomePage> {
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: Image.file(_imageFile!, fit: BoxFit.fill),
+                        // ← 改：原图 + RotatedBox，与 OCR 坐标系（旋转后空间）对齐
+                        child: RotatedBox(
+                          quarterTurns: _quarterTurns,
+                          child: Image.file(_imageFile!, fit: BoxFit.fill, filterQuality: FilterQuality.high),
+                        ),
                       ),
                       ..._ocrWords.map((w) {
                         return Positioned(
