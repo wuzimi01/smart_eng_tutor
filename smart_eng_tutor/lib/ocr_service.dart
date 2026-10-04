@@ -31,7 +31,6 @@ class OcrService {
       for (final line in block.lines) {
         for (final element in line.elements) {
           final bbox = element.boundingBox;
-          if (bbox == null) continue;
           final tokens = element.text
               .split(RegExp(r'[\s,.:;!?()"“”]+'))
               .where((t) => t.trim().isNotEmpty)
