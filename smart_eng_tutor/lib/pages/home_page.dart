@@ -76,25 +76,29 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _pickAndRecognize(ImageSource source) async {
     try {
-      final XFile? picked = await _picker.pickImage(
-        source: source,
-        imageQuality: 100,
-        maxWidth: 8192, // ← 新增：保证 OCR 用图分辨率
-      );
-      if (picked == null) return;
+    final XFile? picked = await _picker.pickImage(
+      source: source,
+      imageQuality: 100,
+      maxWidth: 8192, // ← 新增：保证 OCR 用图分辨率
+    );
+    if (picked == null) return;
 
-      // 旋转预览：返回 (原图, 转数)
-      final result = await Navigator.push<(File, int)>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => RotatePreviewPage(
-            sourceFile: File(picked.path),
-            ocrService: _ocrService,
-          ),
+    if (!mounted) return; // ← 加：pickImage 是 await，之后确认页面还在
+
+    // 旋转预览：返回 (原图, 转数)
+    final result = await Navigator.push<(File, int)>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RotatePreviewPage(
+          sourceFile: File(picked.path),
+          ocrService: _ocrService,
         ),
-      );
-      // if (result == null) return;
-      // final (file, turns) = result;
+      ),
+    );
+    if (result == null) return;
+    if (!mounted) return; // ← 加：push 也是 await，同样确认
+
+    final (file, turns) = result;
 
       // setState(() {
       //   _isRecognizing = true;
@@ -130,8 +134,6 @@ class _HomePageState extends State<HomePage> {
       //       ? '未识别到英文单词，请重试或检查图片清晰度'
       //       : '点击图片上的单词进行查询（共 ${words.length} 个）';
       // });
-    if (result == null) return;
-    final (file, turns) = result;
 
     // 预处理（内部已按 turns 旋转 + 去红笔 + 二值化）
     final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
@@ -269,7 +271,7 @@ class _HomePageState extends State<HomePage> {
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: _chips.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                separatorBuilder: (_,_) => const SizedBox(width: 8),
                 itemBuilder: (context, index) {
                   final word = _chips[index];
                   final selected = word == _selectedWord;
@@ -282,7 +284,7 @@ class _HomePageState extends State<HomePage> {
                       decoration: BoxDecoration(
                         color: selected
                             ? Colors.blue
-                            : Colors.blue.withOpacity(0.1),
+                            : Colors.blue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       alignment: Alignment.center,
@@ -407,10 +409,10 @@ class _HomePageState extends State<HomePage> {
                               child: Container(
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.15),
+                                  color: Colors.blue.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(4),
                                   border: Border.all(
-                                      color: Colors.blue.withOpacity(0.6)),
+                                      color: Colors.blue.withValues(alpha: 0.6)),
                                 ),
                                 child: FittedBox(
                                   fit: BoxFit.scaleDown,
