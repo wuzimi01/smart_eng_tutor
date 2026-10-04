@@ -2,21 +2,22 @@ import './database_helper.dart';
 
 /// 一次查询的完整结果（UI 只负责显示，不做业务判断）
 class LookupResult {
-  final List<String> chips;   // 候选词列表
-  final String? selected;     // 默认选中的词
-  final String displayText;   // 释义文本
+  final List<String> chips; // 候选词列表
+  final String? selected; // 默认选中的词
+  final String displayText; // 释义文本
+  final List<String> tags; // 选中词的考纲标签，如 ['cet4', 'gk']
 
   const LookupResult({
     required this.chips,
     this.selected,
     required this.displayText,
+    this.tags = const [],
   });
 }
 
 /// 查词业务：词根扩展 → 去重 → 逐个查释义
 class WordLookup {
   final DatabaseHelper dbHelper;
-
   WordLookup(this.dbHelper);
 
   /// 输入词搜索：查原型，自动展示第一个有释义的候选
@@ -32,10 +33,12 @@ class WordLookup {
     for (final c in unique) {
       final text = await _formatTranslation(c);
       if (text != null) {
+        final tags = await dbHelper.queryTags(c);
         return LookupResult(
           chips: unique,
           selected: c,
           displayText: text,
+          tags: tags,
         );
       }
     }
@@ -45,10 +48,12 @@ class WordLookup {
   /// 用户手动选中某个候选词
   Future<LookupResult> select(String word) async {
     final text = await _formatTranslation(word);
+    final tags = await dbHelper.queryTags(word);
     return LookupResult(
       chips: const [],
       selected: word,
       displayText: text ?? '「$word」没有释义',
+      tags: tags,
     );
   }
 

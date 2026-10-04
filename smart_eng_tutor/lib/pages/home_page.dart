@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-
 import '../services/models.dart';
 import '../services/database_helper.dart';
 import '../services/ocr_service.dart';
@@ -11,6 +10,7 @@ import '../services/ocr_flow.dart';
 import '../services/wordbook_service.dart';
 import 'widgets/ocr_image_view.dart';
 import 'widgets/chip_list.dart';
+import 'widgets/word_info_bar.dart';
 import 'wordbook_list_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -28,21 +28,21 @@ class _HomePageState extends State<HomePage> {
   final OcrService _ocrService = OcrService();
   late final WordLookup _lookup = WordLookup(_dbHelper);
   late final OcrFlow _ocrFlow = OcrFlow(_ocrService);
+  late final WordbookService _wordbook = WordbookService(_dbHelper);
+
   final TextEditingController _controller = TextEditingController();
 
   String _displayText = '请输入内容...';
   bool _isLoading = true;
-
   List<String> _chips = [];
   String? _selectedWord;
+  List<String> _tags = [];
   bool _isFavorited = false;
 
   File? _imageFile;
   Size _imageSize = Size.zero;
   List<OcrWord> _ocrWords = [];
   bool _isRecognizing = false;
-
-  late final WordbookService _wordbook = WordbookService(_dbHelper);
 
   @override
   void initState() {
@@ -121,16 +121,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ==================== 搜索逻辑 ====================
-    Future<void> _search(String word) async {
+  Future<void> _search(String word) async {
     if (word.isEmpty) {
       setState(() {
         _displayText = '请输入内容...';
         _chips = [];
         _selectedWord = null;
-        _isFavorited = false;   // 清空时熄灭星星
+        _tags = [];
+        _isFavorited = false; // 清空时熄灭星星
       });
       return;
     }
+
     try {
       final r = await _lookup.search(word);
       if (!mounted) return;
@@ -142,6 +144,7 @@ class _HomePageState extends State<HomePage> {
         _chips = r.chips;
         _selectedWord = r.selected;
         _displayText = r.displayText;
+        _tags = r.tags;
         _isFavorited = fav;
       });
     } catch (e) {
@@ -149,19 +152,18 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-
-      Future<void> _selectChip(String word) async {
+  Future<void> _selectChip(String word) async {
     try {
       final r = await _lookup.select(word);
       if (!mounted) return;
-      // 先查收藏状态，再一次性 setState —— 星星和释义同帧更新
-      final fav = r.selected != null
-          ? await _wordbook.isFavorited(r.selected!)
-          : false;
+      // 先查收藏状态，再一次性 setState —— 星星、徽章和释义同帧更新
+      final fav =
+          r.selected != null ? await _wordbook.isFavorited(r.selected!) : false;
       if (!mounted) return;
       setState(() {
         _selectedWord = r.selected;
         _displayText = r.displayText;
+        _tags = r.tags;
         _isFavorited = fav;
       });
     } catch (e) {
@@ -169,17 +171,15 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-
-
-    Future<void> _toggleFavorite() async {
+  Future<void> _toggleFavorite() async {
     final word = _selectedWord;
     if (word == null) return;
     try {
-            final r = await _wordbook.toggle(word);
+      final r = await _wordbook.toggle(word);
       if (!mounted) return;
       // 以数据库的真实状态为准，而不是假设翻转成功
       final real = await _wordbook.isFavorited(word);
-      if (!mounted) return;                       // ← 补这个：第二次 await 之后
+      if (!mounted) return;
       setState(() => _isFavorited = real);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -194,21 +194,19 @@ class _HomePageState extends State<HomePage> {
                     label: '撤销',
                     onPressed: () async {
                       await _wordbook.toggle(word);
-                      if (mounted) {              // 撤销回调里已有，保留
-                        final still = await _wordbook.isFavorited(word);
-                        if (mounted) setState(() => _isFavorited = still);
-                      }
+                      if (!mounted) return;
+                      final still = await _wordbook.isFavorited(word);
+                      if (!mounted) return;
+                      setState(() => _isFavorited = still);
                     },
                   )
                 : null,
           ),
         );
-
     } catch (e) {
       _showSnack('收藏出错: $e');
     }
   }
-
 
   Future<void> _onTapOcrWord(String word) async {
     _controller.text = word;
@@ -272,19 +270,16 @@ class _HomePageState extends State<HomePage> {
                               padding: EdgeInsets.all(16),
                               child: CircularProgressIndicator(),
                             ),
-                          // 收藏按钮：单词 chips 下方、释义上方
+                          // 信息栏：星星 + 单词 + 考纲徽章（居左）
                           if (_selectedWord != null && !_isRecognizing)
-                            IconButton(
-                              icon: Icon(
-                                _isFavorited ? Icons.star : Icons.star_border,
-                                color:
-                                    _isFavorited ? Colors.amber : Colors.grey,
-                              ),
-                              iconSize: 28,
-                              tooltip: _isFavorited ? '取消收藏' : '收藏到词库',
-                              onPressed: _toggleFavorite,
+                            WordInfoBar(
+                              word: _selectedWord!,
+                              isFavorited: _isFavorited,
+                              tags: _tags,
+                              onToggleFavorite: _toggleFavorite,
                             ),
-                          // 释义文本（只承载正常提示/结果，错误走 SnackBar）
+                          const SizedBox(height: 12),
+                          // 释义文本（保持居中）
                           Text(
                             _displayText,
                             textAlign: TextAlign.center,

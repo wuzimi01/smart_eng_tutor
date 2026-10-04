@@ -81,39 +81,49 @@ class DatabaseHelper {
     );
     return rows.map((row) => row['stem'] as String).toList();
   }
+  
+  /// 查某词的考纲标签（tag 列，空格分隔的代码），如 ['cet4', 'gk']
+  Future<List<String>> queryTags(String word) async {
+    if (_dictDb == null) return [];
+    final rows = await _dictDb!.query(
+      'stardict',
+      columns: ['tag'],
+      where: 'word = ?',
+      whereArgs: [word],
+      limit: 1,
+    );
+    final tag = rows.firstOrNull?['tag'] as String? ?? '';
+    return tag.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+  }
 
     // ==================== 词库（单词本） ====================
 
-  /// 打开/创建词库库，并确保默认词库存在。在 init() 末尾调用。
-  Future<bool> _initBookDb() async {
-    try {
-      final bookPath = join(_docPath, 'wordbook.db');
-      _bookDb = await openDatabase(bookPath, version: 1, onCreate: (db, v) async {
-        await db.execute('''
-          CREATE TABLE wordbooks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE wordbook_words (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bookId INTEGER NOT NULL,
-            dictId INTEGER,
-            word TEXT NOT NULL,
-            UNIQUE(bookId, word),
-            FOREIGN KEY(bookId) REFERENCES wordbooks(id)
-          )
-        ''');
-      });
-      // 确保默认词库存在（幂等）
-      await _bookDb!.insert('wordbooks', {'name': '默认词库'},
-          conflictAlgorithm: ConflictAlgorithm.ignore);
-      return true;
-    } catch (e) {
-      return false;
+    /// 打开/创建词库库。
+    /// 首次运行时从 assets/wordbook.db 拷贝（含预导入的考纲词库），
+    /// 之后 app 端不再覆盖 —— 保证用户的收藏数据不被重置。
+    Future<bool> _initBookDb() async {
+      try {
+        final bookPath = join(_docPath, 'wordbook.db');
+
+        // 首次运行：从 assets 拷贝初始词库（8 个考纲词库 + 默认词库）
+        if (!await File(bookPath).exists()) {
+          try {
+            await _copyFromAssets('assets/wordbook.db', bookPath);
+          } catch (e) {
+            return false; // assets 里没有或读取失败
+          }
+        }
+
+        _bookDb = await openDatabase(bookPath, version: 1);
+        // 幂等兜底：assets 的 db 可能没有默认词库（如纯脚本导出的）
+        await _bookDb!.insert('wordbooks', {'name': '默认词库'},
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+        return true;
+      } catch (e) {
+        return false;
+      }
     }
-  }
+
 
     /// 所有词库（含每个词库的词条数）
   Future<List<Wordbook>> queryWordbooks() async {

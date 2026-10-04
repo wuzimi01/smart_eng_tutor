@@ -27,3 +27,4 @@ flutter:
   assets:
     - assets/lemma.en.db
     - assets/stardict.db
+    - assets/wordbook.db
