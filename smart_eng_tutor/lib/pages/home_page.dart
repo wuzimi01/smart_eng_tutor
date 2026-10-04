@@ -78,8 +78,8 @@ class _HomePageState extends State<HomePage> {
     try {
       final XFile? picked = await _picker.pickImage(
         source: source,
-        imageQuality: 95,
-        maxWidth: 2048, // ← 新增：保证 OCR 用图分辨率
+        imageQuality: 100,
+        maxWidth: 8192, // ← 新增：保证 OCR 用图分辨率
       );
       if (picked == null) return;
 
@@ -93,43 +93,70 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
-      if (result == null) return;
-      final (file, turns) = result;
+      // if (result == null) return;
+      // final (file, turns) = result;
 
-      setState(() {
-        _isRecognizing = true;
-        _imageFile = file;
-        _quarterTurns = turns;
-        _ocrWords = [];
-        _displayText = '🔍 正在识别图片中的文字...';
-      });
+      // setState(() {
+      //   _isRecognizing = true;
+      //   _imageFile = file;
+      //   _quarterTurns = turns;
+      //   _ocrWords = [];
+      //   _displayText = '🔍 正在识别图片中的文字...';
+      // });
 
-      // 显示尺寸按旋转后计算
-      final s = await _ocrService.readImageSize(file);
-      _imageSize = turns.isOdd ? Size(s.height, s.width) : s;
+      // // 显示尺寸按旋转后计算
+      // final s = await _ocrService.readImageSize(file);
+      // _imageSize = turns.isOdd ? Size(s.height, s.width) : s;
 
-      // OCR 使用预处理增强图（旋转 + 去红笔 + 二值化）
-      final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
-      final words = await _ocrService.recognize(prep.file);
+      // // OCR 使用预处理增强图（旋转 + 去红笔 + 二值化）
+      // final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
+      // final words = await _ocrService.recognize(prep.file);
 
-      // 把增强图坐标系换算回"旋转后原图"坐标系
-      setState(() {
-        _isRecognizing = false;
-        _ocrWords = words
-            .map((w) => OcrWord(
-                  w.text,
-                  Rect.fromLTRB(
-                    w.rect.left / prep.scale,
-                    w.rect.top / prep.scale,
-                    w.rect.right / prep.scale,
-                    w.rect.bottom / prep.scale,
-                  ),
-                ))
-            .toList();
-        _displayText = words.isEmpty
-            ? '未识别到英文单词，请重试或检查图片清晰度'
-            : '点击图片上的单词进行查询（共 ${words.length} 个）';
-      });
+      // // 把增强图坐标系换算回"旋转后原图"坐标系
+      // setState(() {
+      //   _isRecognizing = false;
+      //   _ocrWords = words
+      //       .map((w) => OcrWord(
+      //             w.text,
+      //             Rect.fromLTRB(
+      //               w.rect.left,
+      //               w.rect.top,
+      //               w.rect.right,
+      //               w.rect.bottom,
+      //             ),
+      //           ))
+      //       .toList();
+      //   _displayText = words.isEmpty
+      //       ? '未识别到英文单词，请重试或检查图片清晰度'
+      //       : '点击图片上的单词进行查询（共 ${words.length} 个）';
+      // });
+    if (result == null) return;
+    final (file, turns) = result;
+
+    // 预处理（内部已按 turns 旋转 + 去红笔 + 二值化）
+    final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
+    final words = await _ocrService.recognize(prep.file);
+
+    final s = await _ocrService.readImageSize(prep.file); // 预处理图尺寸
+
+    setState(() {
+      _isRecognizing = false;
+      _imageFile = prep.file;
+      _quarterTurns = 0;                 // 图已转正，UI 不用再转
+      _imageSize = s;                    // 不再需要 turns.isOdd 宽高互换
+      _ocrWords = words
+          .map((w) => OcrWord(
+                w.text,
+                Rect.fromLTRB(
+                  w.rect.left, w.rect.top, w.rect.right, w.rect.bottom,
+                ),
+              ))
+          .toList();
+      _displayText = words.isEmpty
+          ? '未识别到英文单词，请重试或检查图片清晰度'
+          : '点击图片上的单词进行查询（共 ${words.length} 个）';
+    });
+//11111111111111111111111111
     } catch (e) {
       setState(() {
         _isRecognizing = false;
@@ -363,7 +390,7 @@ class _HomePageState extends State<HomePage> {
                         // ← 改：原图 + RotatedBox，与 OCR 坐标系（旋转后空间）对齐
                         child: RotatedBox(
                           quarterTurns: _quarterTurns,
-                          child: Image.file(_imageFile!, fit: BoxFit.fill),
+                          child: Image.file(_imageFile!, fit: BoxFit.fill, filterQuality: FilterQuality.high),
                         ),
                       ),
                       ..._ocrWords.map((w) {

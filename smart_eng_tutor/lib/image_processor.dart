@@ -7,8 +7,7 @@ import 'package:path_provider/path_provider.dart';
 /// 图像预处理结果
 class PreprocessResult {
   final File file;      // 送 OCR 的增强图
-  final double scale;   // 增强图宽 / 旋转后原图宽（词框坐标需除以它还原）
-  const PreprocessResult(this.file, this.scale);
+  const PreprocessResult(this.file);
 }
 
 /// 图像处理器：负责预处理流水线（与 OCR 识别解耦）
@@ -22,24 +21,19 @@ class ImageProcessor {
     img.Image? image = img.decodeImage(bytes);
     if (image == null) throw Exception('无法解码图片');
 
-    final origW = image.width;
-    final origH = image.height;
-
     // ---- 1. 旋转（quarterTurns: 1=90°顺时针, 2=180°, 3=270°）----
     final q = quarterTurns % 4;
     if (q != 0) {
       // image 4.x：angle 单位为度
       image = img.copyRotate(image, angle: q * 90);
     }
-
-    // ---- 2. 小图放大（ML Kit 建议文字高度 ≥ 16px）----
-    if (image.width < 1400) {
-      image = img.copyResize(
-        image,
-        width: 1400,
-        interpolation: img.Interpolation.cubic,
-      );
-    }
+    // if (image.width < 1400) {
+    //   image = img.copyResize(
+    //     image,
+    //     width: 1400,
+    //     interpolation: img.Interpolation.cubic,
+    //   );
+    // }
 
     // ---- 3. 去红笔批改：红笔像素置白 ----
     image = _removeRedMarks(image);
@@ -49,7 +43,7 @@ class ImageProcessor {
     image = img.adjustColor(image, contrast: 1.3);
 
     // ---- 5. Bradley 自适应二值化 ----
-    //image = _bradleyThreshold(image);
+    image = _bradleyThreshold(image);
 
     // ---- 6. 导出 ----
     final tempDir = await getTemporaryDirectory();
@@ -57,10 +51,8 @@ class ImageProcessor {
         'prep_${DateTime.now().millisecondsSinceEpoch}.png'));
     final pngBytes = img.encodePng(image);
     await out.writeAsBytes(Uint8List.fromList(pngBytes));
-
-    // 词框坐标换算：OCR 结果在增强图坐标系，需除以 scale 回到"旋转后原图"坐标系
-    final rotW = q.isOdd ? origH : origW;
-    return PreprocessResult(out, image.width / rotW);
+    
+    return PreprocessResult(out);
   }
 
   /// 去红笔批改：红笔像素（R 明显高于 G、B）置白
