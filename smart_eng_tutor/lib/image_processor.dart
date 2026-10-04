@@ -37,6 +37,7 @@ class ImageProcessor {
 
     // ---- 3. 去红笔批改：红笔像素置白 ----
     image = _removeRedMarks(image);
+    image = _removeBlueMarks(image);
 
     // ---- 4. 灰度 + 对比度增强 ----
     image = img.grayscale(image);
@@ -72,6 +73,24 @@ class ImageProcessor {
     }
     return image;
   }
+
+  /// 去蓝笔批改：蓝笔像素（B 明显高于 R、G）置白
+img.Image _removeBlueMarks(img.Image image) {
+  final w = image.width;
+  final h = image.height;
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      final p = image.getPixel(x, y);
+      final r = p.r.toDouble();
+      final g = p.g.toDouble();
+      final b = p.b.toDouble();
+      if (b > 90 && b > r * 1.5 && b > g * 1.5) {
+        image.setPixelRgba(x, y, 255, 255, 255, 255);
+      }
+    }
+  }
+  return image;
+}
 
   /// Bradley 自适应阈值二值化（image 包无内置，手写实现）
   img.Image _bradleyThreshold(img.Image src, {double t = 0.15}) {
