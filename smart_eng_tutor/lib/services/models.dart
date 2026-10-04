@@ -23,14 +23,13 @@ class Wordbook {
 class WordbookEntry {
   final int id;
   final int bookId;
+  final int? dictId; // 关联的词典 id，null = 未关联（为多词典导入铺垫）
   final String word;
-  final String? translation; // 收藏时顺带存的释义快照，可为空
-  final String createdAt;
   const WordbookEntry({
     required this.id,
     required this.bookId,
+    this.dictId,
     required this.word,
-    this.translation,
-    required this.createdAt,
   });
 }
+

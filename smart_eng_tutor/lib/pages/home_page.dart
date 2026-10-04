@@ -121,52 +121,66 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ==================== 搜索逻辑 ====================
-  Future<void> _search(String word) async {
+    Future<void> _search(String word) async {
     if (word.isEmpty) {
       setState(() {
         _displayText = '请输入内容...';
         _chips = [];
         _selectedWord = null;
+        _isFavorited = false;   // 清空时熄灭星星
       });
       return;
     }
     try {
       final r = await _lookup.search(word);
       if (!mounted) return;
+      final fav = r.selected != null
+          ? await _wordbook.isFavorited(r.selected!)
+          : false;
+      if (!mounted) return;
       setState(() {
         _chips = r.chips;
         _selectedWord = r.selected;
         _displayText = r.displayText;
+        _isFavorited = fav;
       });
     } catch (e) {
       _showSnack('查询出错: $e');
     }
   }
 
-  Future<void> _selectChip(String word) async {
+
+      Future<void> _selectChip(String word) async {
     try {
       final r = await _lookup.select(word);
       if (!mounted) return;
-      setState(() => _selectedWord = r.selected);
-      if (r.selected != null) {
-        final w = r.selected!;
-        _wordbook.isFavorited(w).then((fav) {
-          if (mounted) setState(() => _isFavorited = fav);
-        });
-      }
+      // 先查收藏状态，再一次性 setState —— 星星和释义同帧更新
+      final fav = r.selected != null
+          ? await _wordbook.isFavorited(r.selected!)
+          : false;
+      if (!mounted) return;
+      setState(() {
+        _selectedWord = r.selected;
+        _displayText = r.displayText;
+        _isFavorited = fav;
+      });
     } catch (e) {
       _showSnack('查询出错: $e');
     }
   }
 
-  Future<void> _toggleFavorite() async {
+
+
+    Future<void> _toggleFavorite() async {
     final word = _selectedWord;
     if (word == null) return;
     try {
-      final r = await _wordbook.toggle(word, _displayText);
+            final r = await _wordbook.toggle(word);
       if (!mounted) return;
-      setState(() => _isFavorited = r.favorited);
-      // 底部提示条（SnackBar），不污染释义文本
+      // 以数据库的真实状态为准，而不是假设翻转成功
+      final real = await _wordbook.isFavorited(word);
+      if (!mounted) return;                       // ← 补这个：第二次 await 之后
+      setState(() => _isFavorited = real);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -175,21 +189,26 @@ class _HomePageState extends State<HomePage> {
             duration: const Duration(milliseconds: 1200),
             behavior: SnackBarBehavior.floating,
             width: 260,
-            action: r.favorited
+            action: real
                 ? SnackBarAction(
                     label: '撤销',
                     onPressed: () async {
-                      await _wordbook.toggle(word, null);
-                      if (mounted) setState(() => _isFavorited = false);
+                      await _wordbook.toggle(word);
+                      if (mounted) {              // 撤销回调里已有，保留
+                        final still = await _wordbook.isFavorited(word);
+                        if (mounted) setState(() => _isFavorited = still);
+                      }
                     },
                   )
                 : null,
           ),
         );
+
     } catch (e) {
       _showSnack('收藏出错: $e');
     }
   }
+
 
   Future<void> _onTapOcrWord(String word) async {
     _controller.text = word;
@@ -292,12 +311,20 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.menu_book),
             tooltip: '我的词库',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WordbookListPage(dbHelper: _dbHelper),
-              ),
-            ),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => WordbookListPage(dbHelper: _dbHelper),
+                ),
+              );
+              // 返回后按当前选中词刷新星星
+              final w = _selectedWord;
+              if (w != null && mounted) {
+                final fav = await _wordbook.isFavorited(w);
+                if (mounted) setState(() => _isFavorited = fav);
+              }
+            },
           ),
           if (_isMobile) ...[
             IconButton(

@@ -163,13 +163,8 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
                             : const Icon(Icons.star_outline),
                         title: Text(e.word,
                             style: const TextStyle(fontSize: 18)),
-                        subtitle: e.translation == null
-                            ? null
-                            : Text(
-                                e.translation!.replaceAll('\n', ' ').trim(),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                        // translation 已从数据模型移除，摘要行删掉；
+                        // 如想在列表区分来源词典，后续可用 dictId 查词典名
                         trailing: _selectMode
                             ? null
                             : const Icon(Icons.chevron_right),
