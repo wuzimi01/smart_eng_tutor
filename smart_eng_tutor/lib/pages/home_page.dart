@@ -1,13 +1,16 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../services/models.dart';
 import '../services/database_helper.dart';
 import '../services/ocr_service.dart';
 import '../services/word_lookup.dart';
 import '../services/ocr_flow.dart';
+import '../services/wordbook_service.dart';
 import 'widgets/ocr_image_view.dart';
 import 'widgets/chip_list.dart';
-import 'package:image_picker/image_picker.dart';
+import 'wordbook_list_page.dart';
+
 
 
 class HomePage extends StatefulWidget {
@@ -31,11 +34,14 @@ class _HomePageState extends State<HomePage> {
   bool _isLoading = true;
   List<String> _chips = [];
   String? _selectedWord;
+  bool _isFavorited = false;
 
   File? _imageFile;
   Size _imageSize = Size.zero;
   List<OcrWord> _ocrWords = [];
   bool _isRecognizing = false;
+
+  late final WordbookService _wordbook = WordbookService(_dbHelper);
 
   @override
   void initState() {
@@ -130,12 +136,33 @@ class _HomePageState extends State<HomePage> {
     try {
       final r = await _lookup.select(word);
       if (!mounted) return;
-      setState(() {
-        _selectedWord = r.selected;
-        _displayText = r.displayText;
-      });
+            setState(() => _selectedWord = r.selected);
+      if (r.selected != null) {
+        _wordbook.isFavorited(r.selected!).then((fav) {
+          if (mounted) setState(() => _isFavorited = fav);
+        });
+      }
+
     } catch (e) {
       setState(() => _displayText = '查询出错: $e');
+    }
+  }
+    Future<void> _toggleFavorite() async {
+    final word = _selectedWord;
+    if (word == null) return;
+    try {
+      final r = await _wordbook.toggle(word, _displayText);
+      if (!mounted) return;
+      setState(() {
+        _isFavorited = r.favorited;
+        _displayText = r.message;
+      });
+      // 1.5 秒后恢复释义显示
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted && _selectedWord == word) _selectChip(word);
+      });
+    } catch (e) {
+      setState(() => _displayText = '收藏出错: $e');
     }
   }
 
@@ -202,15 +229,38 @@ class _HomePageState extends State<HomePage> {
                               padding: EdgeInsets.all(16),
                               child: CircularProgressIndicator(),
                             ),
-                          Text(
-                            _displayText,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 24,
-                              color: _displayText == '请输入内容...'
-                                  ? Colors.grey
-                                  : Colors.black87,
-                            ),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_isRecognizing)
+                                const Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              Text(
+                                _displayText,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  color: _displayText == '请输入内容...'
+                                      ? Colors.grey
+                                      : Colors.black87,
+                                ),
+                              ),
+                              if (_selectedWord != null)
+                                IconButton(
+                                  icon: Icon(
+                                    _isFavorited
+                                        ? Icons.star
+                                        : Icons.star_border,
+                                    color: _isFavorited
+                                        ? Colors.amber
+                                        : Colors.grey,
+                                  ),
+                                  tooltip: _isFavorited ? '取消收藏' : '收藏到词库',
+                                  onPressed: _toggleFavorite,
+                                ),
+                            ],
                           ),
                         ],
                       ),
@@ -221,27 +271,35 @@ class _HomePageState extends State<HomePage> {
       ),
     );
 
-    if (_isMobile) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Smart English Tutor'),
-          actions: [
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Smart English Tutor'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.menu_book),
+            tooltip: '我的词库',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => WordbookListPage(dbHelper: _dbHelper),
+              ),
+            ),
+          ),
+          if (_isMobile) ...[
             IconButton(
               icon: _isRecognizing
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.photo_camera),
               tooltip: '拍照选词',
               onPressed: _isRecognizing ? null : _showImageSourceDialog,
             ),
           ],
-        ),
-        body: body,
-      );
-    }
-    return Scaffold(body: body);
+        ],
+      ),
+      body: body,
+    );
+
   }
 }

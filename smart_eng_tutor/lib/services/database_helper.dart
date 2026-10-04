@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' show join, dirname;
+import 'models.dart';
 
 class DatabaseHelper {
   Database? _lemmaDb;
@@ -10,12 +11,13 @@ class DatabaseHelper {
 
   Database? get lemmaDb => _lemmaDb;
   Database? get dictDb => _dictDb;
-
+  Database? _bookDb; // 词库数据库（新建，可读写）
+  late final String _docPath; // 应用文档目录（init 时赋值）
   /// 初始化两个数据库，成功返回 true
   Future<bool> init() async {
     try {
       final appDocDir = await getApplicationDocumentsDirectory();
-
+      _docPath = appDocDir.path;
       // ---- 词根库 ----
       final lemmaPath = join(appDocDir.path, 'lemma.en.db');
       if (!await File(lemmaPath).exists()) {
@@ -37,7 +39,7 @@ class DatabaseHelper {
         }
       }
       _dictDb = await openDatabase(dictPath, readOnly: true);
-
+      if (!await _initBookDb()) return false;
       return true;
     } catch (e) {
       return false;
@@ -80,8 +82,127 @@ class DatabaseHelper {
     return rows.map((row) => row['stem'] as String).toList();
   }
 
+    // ==================== 词库（单词本） ====================
+
+  /// 打开/创建词库库，并确保默认词库存在。在 init() 末尾调用。
+  Future<bool> _initBookDb() async {
+    try {
+      final bookPath = join(_docPath, 'wordbook.db');
+      _bookDb = await openDatabase(bookPath, version: 1, onCreate: (db, v) async {
+        await db.execute('''
+          CREATE TABLE wordbooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE wordbook_words (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bookId INTEGER NOT NULL,
+            word TEXT NOT NULL,
+            translation TEXT,
+            createdAt TEXT NOT NULL,
+            UNIQUE(bookId, word),
+            FOREIGN KEY(bookId) REFERENCES wordbooks(id)
+          )
+        ''');
+      });
+      // 确保默认词库存在（幂等）
+      await _bookDb!.insert('wordbooks', {'name': '默认词库'},
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+    /// 所有词库（含每个词库的词条数）
+  Future<List<Wordbook>> queryWordbooks() async {
+    if (_bookDb == null) return [];
+    final rows = await _bookDb!.rawQuery('''
+      SELECT w.id, w.name, COUNT(s.id) AS cnt
+      FROM wordbooks w
+      LEFT JOIN wordbook_words s ON s.bookId = w.id
+      GROUP BY w.id, w.name
+      ORDER BY w.id
+    ''');
+    return rows
+        .map((r) => Wordbook(
+              id: r['id'] as int,
+              name: r['name'] as String,
+              wordCount: r['cnt'] as int,
+            ))
+        .toList();
+  }
+
+  /// 某词是否已收藏于指定词库
+  Future<bool> isFavorited(String word, {int? bookId}) async {
+    if (_bookDb == null) return false;
+    final bid = bookId ?? await _defaultBookId();
+    final rows = await _bookDb!.query('wordbook_words',
+        where: 'bookId = ? AND word = ?', whereArgs: [bid, word], limit: 1);
+    return rows.isNotEmpty;
+  }
+
+  /// 收藏。返回 'added' 新收藏 / 'exists' 已存在 / 'error' 出错
+  Future<String> addWord(String word, String? translation, {int? bookId}) async {
+    if (_bookDb == null) return 'error';
+    try {
+      final bid = bookId ?? await _defaultBookId();
+      final id = await _bookDb!.insert(
+        'wordbook_words',
+        {
+          'bookId': bid,
+          'word': word,
+          'translation': translation,
+          'createdAt': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      return id > 0 ? 'added' : 'exists'; // 0 = 冲突被忽略 = 已经收藏过
+    } catch (e) {
+      return 'error'; // 真正的数据库错误（如表不存在）
+    }
+  }
+
+  /// 取消收藏
+  Future<bool> removeWord(String word, {int? bookId}) async {
+    if (_bookDb == null) return false;
+    final bid = bookId ?? await _defaultBookId();
+    final n = await _bookDb!.delete('wordbook_words',
+        where: 'bookId = ? AND word = ?', whereArgs: [bid, word]);
+    return n > 0;
+  }
+
+  /// 某词库的全部词条（按收藏时间倒序）
+  Future<List<WordbookEntry>> queryEntries(int bookId) async {
+    if (_bookDb == null) return [];
+    final rows = await _bookDb!.query(
+      'wordbook_words',
+      where: 'bookId = ?',
+      whereArgs: [bookId],
+      orderBy: 'createdAt DESC',
+    );
+    return rows
+        .map((r) => WordbookEntry(
+              id: r['id'] as int,
+              bookId: r['bookId'] as int,
+              word: r['word'] as String,
+              translation: r['translation'] as String?,
+              createdAt: r['createdAt'] as String,
+            ))
+        .toList();
+  }
+
+
+
   void dispose() {
     _lemmaDb?.close();
     _dictDb?.close();
+    _bookDb?.close();
+  }
+  Future<int> _defaultBookId() async {
+    final rows = await _bookDb!.query('wordbooks',
+        where: 'name = ?', whereArgs: ['默认词库'], limit: 1);
+    return rows.first['id'] as int;
   }
 }
