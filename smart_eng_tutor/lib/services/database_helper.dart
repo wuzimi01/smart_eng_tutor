@@ -193,6 +193,87 @@ class DatabaseHelper {
         .toList();
   }
 
+    // ==================== 词库管理（多词库） ====================
+
+  /// 新建词库。成功返回 id，重名返回 null。
+  Future<int?> createBook(String name) async {
+    if (_bookDb == null || name.trim().isEmpty) return null;
+    final id = await _bookDb!.insert('wordbooks', {'name': name.trim()},
+        conflictAlgorithm: ConflictAlgorithm.ignore); // UNIQUE 拦重名
+    return id > 0 ? id : null;
+  }
+
+  /// 删除词库（先删词条再删词库，默认词库不允许删）。
+  Future<bool> deleteBook(int bookId) async {
+    if (_bookDb == null) return false;
+    if (bookId == await _defaultBookId()) return false; // 保护默认词库
+    final n = await _bookDb!.delete('wordbook_words',
+        where: 'bookId = ?', whereArgs: [bookId]);
+    final d = await _bookDb!
+        .delete('wordbooks', where: 'id = ?', whereArgs: [bookId]);
+    return d > 0 || n > 0;
+  }
+
+  /// 批量删除词条。
+  Future<int> deleteWords(List<int> entryIds) async {
+    if (_bookDb == null || entryIds.isEmpty) return 0;
+    final ph = List.filled(entryIds.length, '?').join(',');
+    return _bookDb!.delete('wordbook_words',
+        where: 'id IN ($ph)', whereArgs: entryIds);
+  }
+
+  /// 查询所有词库（用于"复制/剪切到..."选择目标）。
+  Future<List<Wordbook>> queryOtherBooks(int excludeBookId) async {
+    return (await queryWordbooks()).where((b) => b.id != excludeBookId).toList();
+  }
+
+  /// 复制词条到目标词库（目标已存在的词静默跳过）。返回成功条数。
+  Future<int> copyWords(List<WordbookEntry> entries, int targetBookId) async {
+    if (_bookDb == null || entries.isEmpty) return 0;
+    int n = 0;
+    await _bookDb!.transaction((txn) async {
+      for (final e in entries) {
+        final id = await txn.insert(
+          'wordbook_words',
+          {
+            'bookId': targetBookId,
+            'word': e.word,
+            'translation': e.translation,
+            'createdAt': DateTime.now().toIso8601String(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        if (id > 0) n++;
+      }
+    });
+    return n;
+  }
+
+  /// 剪切 = 复制成功后删除原词条。返回实际移动条数。
+  Future<int> moveWords(List<WordbookEntry> entries, int targetBookId) async {
+    if (_bookDb == null || entries.isEmpty) return 0;
+    int n = 0;
+    await _bookDb!.transaction((txn) async {
+      for (final e in entries) {
+        final id = await txn.insert(
+          'wordbook_words',
+          {
+            'bookId': targetBookId,
+            'word': e.word,
+            'translation': e.translation,
+            'createdAt': e.createdAt, // 保留原收藏时间
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        if (id > 0) {
+          await txn
+              .delete('wordbook_words', where: 'id = ?', whereArgs: [e.id]);
+          n++;
+        }
+      }
+    });
+    return n;
+  }
 
 
   void dispose() {

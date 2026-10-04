@@ -1,6 +1,8 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../services/models.dart';
 import '../services/database_helper.dart';
 import '../services/ocr_service.dart';
@@ -10,8 +12,6 @@ import '../services/wordbook_service.dart';
 import 'widgets/ocr_image_view.dart';
 import 'widgets/chip_list.dart';
 import 'wordbook_list_page.dart';
-
-
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -32,6 +32,7 @@ class _HomePageState extends State<HomePage> {
 
   String _displayText = '请输入内容...';
   bool _isLoading = true;
+
   List<String> _chips = [];
   String? _selectedWord;
   bool _isFavorited = false;
@@ -58,8 +59,21 @@ class _HomePageState extends State<HomePage> {
     if (_isMobile) _ocrService.ensureInitialized();
   }
 
-  // ==================== OCR 流程 ====================
+  // ==================== 提示条 ====================
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(milliseconds: 1800),
+        ),
+      );
+  }
 
+  // ==================== OCR 流程 ====================
   Future<void> _showImageSourceDialog() async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -101,15 +115,12 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _isRecognizing = false;
-        _displayText = '❌ OCR 识别失败: $e';
-      });
+      setState(() => _isRecognizing = false);
+      _showSnack('❌ OCR 识别失败: $e');
     }
   }
 
   // ==================== 搜索逻辑 ====================
-
   Future<void> _search(String word) async {
     if (word.isEmpty) {
       setState(() {
@@ -128,7 +139,7 @@ class _HomePageState extends State<HomePage> {
         _displayText = r.displayText;
       });
     } catch (e) {
-      setState(() => _displayText = '查询出错: $e');
+      _showSnack('查询出错: $e');
     }
   }
 
@@ -136,33 +147,47 @@ class _HomePageState extends State<HomePage> {
     try {
       final r = await _lookup.select(word);
       if (!mounted) return;
-            setState(() => _selectedWord = r.selected);
+      setState(() => _selectedWord = r.selected);
       if (r.selected != null) {
-        _wordbook.isFavorited(r.selected!).then((fav) {
+        final w = r.selected!;
+        _wordbook.isFavorited(w).then((fav) {
           if (mounted) setState(() => _isFavorited = fav);
         });
       }
-
     } catch (e) {
-      setState(() => _displayText = '查询出错: $e');
+      _showSnack('查询出错: $e');
     }
   }
-    Future<void> _toggleFavorite() async {
+
+  Future<void> _toggleFavorite() async {
     final word = _selectedWord;
     if (word == null) return;
     try {
       final r = await _wordbook.toggle(word, _displayText);
       if (!mounted) return;
-      setState(() {
-        _isFavorited = r.favorited;
-        _displayText = r.message;
-      });
-      // 1.5 秒后恢复释义显示
-      Future.delayed(const Duration(milliseconds: 1500), () {
-        if (mounted && _selectedWord == word) _selectChip(word);
-      });
+      setState(() => _isFavorited = r.favorited);
+      // 底部提示条（SnackBar），不污染释义文本
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(r.message),
+            duration: const Duration(milliseconds: 1200),
+            behavior: SnackBarBehavior.floating,
+            width: 260,
+            action: r.favorited
+                ? SnackBarAction(
+                    label: '撤销',
+                    onPressed: () async {
+                      await _wordbook.toggle(word, null);
+                      if (mounted) setState(() => _isFavorited = false);
+                    },
+                  )
+                : null,
+          ),
+        );
     } catch (e) {
-      setState(() => _displayText = '收藏出错: $e');
+      _showSnack('收藏出错: $e');
     }
   }
 
@@ -180,7 +205,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ==================== UI ====================
-
   @override
   Widget build(BuildContext context) {
     final body = SafeArea(
@@ -229,38 +253,28 @@ class _HomePageState extends State<HomePage> {
                               padding: EdgeInsets.all(16),
                               child: CircularProgressIndicator(),
                             ),
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_isRecognizing)
-                                const Padding(
-                                  padding: EdgeInsets.all(16),
-                                  child: CircularProgressIndicator(),
-                                ),
-                              Text(
-                                _displayText,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  color: _displayText == '请输入内容...'
-                                      ? Colors.grey
-                                      : Colors.black87,
-                                ),
+                          // 收藏按钮：单词 chips 下方、释义上方
+                          if (_selectedWord != null && !_isRecognizing)
+                            IconButton(
+                              icon: Icon(
+                                _isFavorited ? Icons.star : Icons.star_border,
+                                color:
+                                    _isFavorited ? Colors.amber : Colors.grey,
                               ),
-                              if (_selectedWord != null)
-                                IconButton(
-                                  icon: Icon(
-                                    _isFavorited
-                                        ? Icons.star
-                                        : Icons.star_border,
-                                    color: _isFavorited
-                                        ? Colors.amber
-                                        : Colors.grey,
-                                  ),
-                                  tooltip: _isFavorited ? '取消收藏' : '收藏到词库',
-                                  onPressed: _toggleFavorite,
-                                ),
-                            ],
+                              iconSize: 28,
+                              tooltip: _isFavorited ? '取消收藏' : '收藏到词库',
+                              onPressed: _toggleFavorite,
+                            ),
+                          // 释义文本（只承载正常提示/结果，错误走 SnackBar）
+                          Text(
+                            _displayText,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 24,
+                              color: _displayText == '请输入内容...'
+                                  ? Colors.grey
+                                  : Colors.black87,
+                            ),
                           ),
                         ],
                       ),
@@ -289,7 +303,8 @@ class _HomePageState extends State<HomePage> {
             IconButton(
               icon: _isRecognizing
                   ? const SizedBox(
-                      width: 20, height: 20,
+                      width: 20,
+                      height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.photo_camera),
               tooltip: '拍照选词',
@@ -300,6 +315,5 @@ class _HomePageState extends State<HomePage> {
       ),
       body: body,
     );
-
   }
 }
