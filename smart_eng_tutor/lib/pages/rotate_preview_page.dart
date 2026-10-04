@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-
 import '../ocr_service.dart';
 
 class RotatePreviewPage extends StatefulWidget {
   final File sourceFile;
   final OcrService ocrService;
+
   const RotatePreviewPage({
     super.key,
     required this.sourceFile,
@@ -18,26 +18,11 @@ class RotatePreviewPage extends StatefulWidget {
 
 class _RotatePreviewPageState extends State<RotatePreviewPage> {
   int _quarterTurns = 0;
-  bool _saving = false;
 
-  Future<void> _confirm() async {
-    if (_quarterTurns % 4 == 0) {
-      Navigator.pop(context, widget.sourceFile);
-      return;
-    }
-    setState(() => _saving = true);
-    try {
-      final file = await widget.ocrService
-          .rotateImage(widget.sourceFile, _quarterTurns);
-      if (mounted) Navigator.pop(context, file);
-    } catch (e) {
-      if (mounted) {
-        setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('旋转失败: $e')),
-        );
-      }
-    }
+  /// 确认：不再在此生成旋转文件，把 (原图, 转数) 交回主页，
+  /// 由 preprocessImage 统一做旋转 + 增强
+  void _confirm() {
+    Navigator.pop(context, (widget.sourceFile, _quarterTurns)); // Dart 3 record
   }
 
   @override
@@ -49,50 +34,48 @@ class _RotatePreviewPageState extends State<RotatePreviewPage> {
           IconButton(
             icon: const Icon(Icons.done),
             tooltip: '确认',
-            onPressed: _saving ? null : _confirm,
+            onPressed: _confirm,
           ),
         ],
       ),
-      body: _saving
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Expanded(
-                  child: Center(
-                    child: RotatedBox(
-                      quarterTurns: _quarterTurns,
-                      child: Image.file(widget.sourceFile),
-                    ),
-                  ),
-                ),
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton.outlined(
-                          icon: const Icon(Icons.rotate_left),
-                          iconSize: 32,
-                          onPressed: () =>
-                              setState(() => _quarterTurns = (_quarterTurns + 3) % 4),
-                        ),
-                        const SizedBox(width: 24),
-                        Text('${(_quarterTurns % 4) * 90}°',
-                            style: const TextStyle(fontSize: 18)),
-                        const SizedBox(width: 24),
-                        IconButton.outlined(
-                          icon: const Icon(Icons.rotate_right),
-                          iconSize: 32,
-                          onPressed: () =>
-                              setState(() => _quarterTurns = (_quarterTurns + 1) % 4),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+      body: Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: RotatedBox(
+                quarterTurns: _quarterTurns,
+                child: Image.file(widget.sourceFile),
+              ),
             ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton.outlined(
+                    icon: const Icon(Icons.rotate_left),
+                    iconSize: 32,
+                    onPressed: () =>
+                        setState(() => _quarterTurns = (_quarterTurns + 3) % 4),
+                  ),
+                  const SizedBox(width: 24),
+                  Text('${(_quarterTurns % 4) * 90}°',
+                      style: const TextStyle(fontSize: 18)),
+                  const SizedBox(width: 24),
+                  IconButton.outlined(
+                    icon: const Icon(Icons.rotate_right),
+                    iconSize: 32,
+                    onPressed: () =>
+                        setState(() => _quarterTurns = (_quarterTurns + 1) % 4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
