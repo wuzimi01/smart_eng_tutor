@@ -270,26 +270,27 @@ class _HomePageState extends State<HomePage> {
                               padding: EdgeInsets.all(16),
                               child: CircularProgressIndicator(),
                             ),
-                          // 信息栏：星星 + 单词 + 考纲徽章（居左）
-                          if (_selectedWord != null && !_isRecognizing)
+                          // 词条结果区：信息栏 + 释义（整体进 WordInfoBar）
+                          if (_selectedWord != null && !_isRecognizing) ...[
                             WordInfoBar(
                               word: _selectedWord!,
                               isFavorited: _isFavorited,
                               tags: _tags,
+                              displayText: _displayText,
                               onToggleFavorite: _toggleFavorite,
                             ),
-                          const SizedBox(height: 12),
-                          // 释义文本（保持居中）
-                          Text(
-                            _displayText,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 24,
-                              color: _displayText == '请输入内容...'
-                                  ? Colors.grey
-                                  : Colors.black87,
+                          ] else
+                            // 没选中词时（空态/提示语）单独显示文本
+                            Text(
+                              _displayText,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 24,
+                                color: _displayText == '请输入内容...'
+                                    ? Colors.grey
+                                    : Colors.black87,
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ),

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// 词条信息栏：收藏星星 + 单词（加大） + 考纲徽章（居左一行）
+/// 词条结果区：左侧（信息栏 + 释义），右侧（考纲徽章竖列，纵贯两区）
 class WordInfoBar extends StatelessWidget {
   final String word;
   final bool isFavorited;
   final List<String> tags;
+  final String displayText;
   final VoidCallback onToggleFavorite;
 
   const WordInfoBar({
@@ -12,43 +13,77 @@ class WordInfoBar extends StatelessWidget {
     required this.word,
     required this.isFavorited,
     required this.tags,
+    required this.displayText,
     required this.onToggleFavorite,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 收藏星星
-          IconButton(
-            icon: Icon(
-              isFavorited ? Icons.star : Icons.star_border,
-              color: isFavorited ? Colors.amber : Colors.grey,
-            ),
-            iconSize: 26,
-            visualDensity: VisualDensity.compact,
-            tooltip: isFavorited ? '取消收藏' : '收藏到词库',
-            onPressed: onToggleFavorite,
-          ),
-          const SizedBox(width: 4),
-          // 所查单词（加大加粗）
+          // ---- 左侧：信息栏（星星+单词）+ 释义 ----
           Expanded(
-            child: Text(
-              word,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 信息栏：星星 + 单词
+                Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        isFavorited ? Icons.star : Icons.star_border,
+                        color: isFavorited ? Colors.amber : Colors.grey,
+                      ),
+                      iconSize: 26,
+                      visualDensity: VisualDensity.compact,
+                      tooltip: isFavorited ? '取消收藏' : '收藏到词库',
+                      onPressed: onToggleFavorite,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        word,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                // 释义（居中）
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Center(
+                    child: Text(
+                      displayText,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 24, color: Colors.black87),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // ---- 右侧：考纲徽章竖列（纵贯信息区+释义区） ----
+          if (tags.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 64), // 一列徽章的宽度
+              child: Wrap(
+                direction: Axis.vertical,
+                spacing: 4,
+                runSpacing: 6,
+                alignment: WrapAlignment.center,
+                children: [for (final t in tags) ExamBadge(code: t)],
               ),
             ),
-          ),
-          // 考纲徽章（最多显示 3 个）
-          for (final t in tags.take(3)) ...[
-            const SizedBox(width: 6),
-            ExamBadge(code: t),
           ],
         ],
       ),

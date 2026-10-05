@@ -63,8 +63,7 @@ class WordLookup {
     if (trans == null) return null;
     final buffer = StringBuffer();
     for (final row in trans) {
-      buffer.writeln(row['word']);
-      buffer.writeln(row['translation']);
+      buffer.writeln(row['translation']);  // ← 只留释义，删掉 writeln(row['word'])
     }
     return buffer.toString().trim();
   }
