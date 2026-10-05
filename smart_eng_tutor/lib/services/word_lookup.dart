@@ -1,70 +1,83 @@
-import './database_helper.dart';
+import '../dictionary/registry.dart';
+import '../dictionary/dictionary.dart';
+import '../dictionary/section.dart';
 
-/// 一次查询的完整结果（UI 只负责显示，不做业务判断）
+/// 一次查询的完整结果（字段与旧版一致，UI 无感）
 class LookupResult {
-  final List<String> chips; // 候选词列表
-  final String? selected; // 默认选中的词
-  final String displayText; // 释义文本
-  final List<String> tags; // 选中词的考纲标签，如 ['cet4', 'gk']
-
+  final List<String> chips;
+  final String? selected;
+  final String displayText;
+  final List<String> tags;
+  final List<ResultSection> sections; // 新增：本批先附带，下一批 UI 切换用
   const LookupResult({
     required this.chips,
     this.selected,
     required this.displayText,
     this.tags = const [],
+    this.sections = const [],
   });
 }
 
-/// 查词业务：词根扩展 → 去重 → 逐个查释义
+/// 查词业务：词根扩展 → 去重 → 逐个查释义（经注册中心）
 class WordLookup {
-  final DatabaseHelper dbHelper;
-  WordLookup(this.dbHelper);
+  final DictionaryRegistry registry;
+  WordLookup(this.registry);
 
-  /// 输入词搜索：查原型，自动展示第一个有释义的候选
+  Dictionary? get _dict => registry.byId(1); // 主释义词典；多词典后改为聚合
+
   Future<LookupResult> search(String word) async {
-    final stems = await dbHelper.queryStems(word);
-    final candidates = <String>[word, ...stems];
-    final unique = <String>[];
-    for (final c in candidates) {
-      if (!unique.contains(c)) unique.add(c);
-    }
+    final dict = _dict;
+    if (dict == null) return const LookupResult(chips: [], displayText: '词典未就绪');
 
-    // 按顺序找第一个有释义的候选
+    final stems = await dict.queryStems(word);
+    final unique = <String>{word, ...stems}.toList();
+
     for (final c in unique) {
-      final text = await _formatTranslation(c);
+      final sections = await dict.query(c);
+      final text = _displayFromSections(sections);
       if (text != null) {
-        final tags = await dbHelper.queryTags(c);
         return LookupResult(
           chips: unique,
           selected: c,
           displayText: text,
-          tags: tags,
+          tags: _tagsFromSections(sections),
+          sections: sections,
         );
       }
     }
-    return const LookupResult(chips: [], displayText: '未找到释义');
+    return LookupResult(chips: [], displayText: '未找到释义');
   }
 
-  /// 用户手动选中某个候选词
   Future<LookupResult> select(String word) async {
-    final text = await _formatTranslation(word);
-    final tags = await dbHelper.queryTags(word);
+    final dict = _dict;
+    final sections = await dict?.query(word) ?? const [];
+    final text = _displayFromSections(sections);
     return LookupResult(
       chips: const [],
       selected: word,
       displayText: text ?? '「$word」没有释义',
-      tags: tags,
+      tags: _tagsFromSections(sections),
+      sections: sections,
     );
   }
 
-  /// 查释义并拼成显示文本；查不到返回 null
-  Future<String?> _formatTranslation(String word) async {
-    final trans = await dbHelper.queryTranslation(word);
-    if (trans == null) return null;
-    final buffer = StringBuffer();
-    for (final row in trans) {
-      buffer.writeln(row['translation']);  // ← 只留释义，删掉 writeln(row['word'])
+  String? _displayFromSections(List<ResultSection> sections) {
+    final buf = StringBuffer();
+    for (final s in sections) {
+      if (s.type == const SectionType('translation')) {
+        for (final line in (s.data as TranslationData).lines) {
+          buf.writeln(line);
+        }
+      }
     }
-    return buffer.toString().trim();
+    final t = buf.toString().trim();
+    return t.isEmpty ? null : t;
+  }
+
+  List<String> _tagsFromSections(List<ResultSection> sections) {
+    for (final s in sections) {
+      if (s.type == const SectionType('tag')) return (s.data as TagData).codes;
+    }
+    return const [];
   }
 }

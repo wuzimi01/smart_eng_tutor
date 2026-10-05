@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../services/database_helper.dart';
+import '../dictionary/registry.dart';
+import '../dictionary/section.dart';
 
 /// 词条释义详情页
 class WordbookEntryDetailPage extends StatefulWidget {
   final DatabaseHelper dbHelper;
-  final String word;
+  final String word;                              // ← registry 参数已删
+
   const WordbookEntryDetailPage({
     super.key,
     required this.dbHelper,
@@ -26,18 +29,21 @@ class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
   }
 
   Future<void> _load() async {
-    final trans = await widget.dbHelper.queryTranslation(widget.word);
+    final dict = DictionaryRegistry.shared.byId(1);   // ← 单例直接拿
+    final sections = await dict?.query(widget.word) ?? const <ResultSection>[];
     if (!mounted) return;
-    if (trans == null) {
-      setState(() => _text = '词典中未收录该词');
-      return;
+
+    final buf = StringBuffer();
+    for (final s in sections) {
+      if (s.type == const SectionType('translation')) {
+        for (final line in (s.data as TranslationData).lines) {
+          buf.writeln(line);
+        }
+      }
     }
-    final buffer = StringBuffer();
-    for (final row in trans) {
-      buffer.writeln(row['word']);
-      buffer.writeln(row['translation']);
-    }
-    setState(() => _text = buffer.toString().trim());
+
+    final text = buf.toString().trim();
+    setState(() => _text = text.isEmpty ? '词典中未收录该词' : text);
   }
 
   @override
@@ -46,7 +52,8 @@ class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
       appBar: AppBar(title: Text(widget.word)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Text(_text, style: const TextStyle(fontSize: 18, height: 1.6)),
+        child: Text(_text,
+            style: const TextStyle(fontSize: 18, height: 1.6)),
       ),
     );
   }

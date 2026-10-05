@@ -12,6 +12,7 @@ import 'widgets/ocr_image_view.dart';
 import 'widgets/chip_list.dart';
 import 'widgets/word_info_bar.dart';
 import 'wordbook_list_page.dart';
+import '../dictionary/registry.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,10 +24,9 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final bool _isMobile = Platform.isAndroid || Platform.isIOS;
 
-  // 服务
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final OcrService _ocrService = OcrService();
-  late final WordLookup _lookup = WordLookup(_dbHelper);
+  late final WordLookup _lookup = WordLookup(DictionaryRegistry.shared); // ← ① 改
   late final OcrFlow _ocrFlow = OcrFlow(_ocrService);
   late final WordbookService _wordbook = WordbookService(_dbHelper);
 
@@ -57,6 +57,7 @@ class _HomePageState extends State<HomePage> {
       if (!ok) _displayText = '❌ 数据库初始化失败，请检查 assets';
     });
     if (_isMobile) _ocrService.ensureInitialized();
+    // ← ② 这里不再调 _registry.initAll()：main.dart 已做过，删掉原來那行
   }
 
   // ==================== 提示条 ====================
@@ -218,6 +219,7 @@ class _HomePageState extends State<HomePage> {
     _controller.dispose();
     _dbHelper.dispose();
     _ocrService.dispose();
+    // ← ③ 删掉 _registry.disposeAll()：词典活到 app 退出，不随页面销毁
     super.dispose();
   }
 
