@@ -3,6 +3,9 @@ class SectionType {
   final String value;
   const SectionType(this.value);
 
+  /// 类型名，用于设置持久化 key（"show.《dictId》.《name》"）
+  String get name => value;
+
   static const translation = SectionType('translation');
   static const phonetic    = SectionType('phonetic');
   static const example     = SectionType('example');

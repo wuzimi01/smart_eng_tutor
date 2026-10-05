@@ -64,7 +64,7 @@ class WordLookup {
   String? _displayFromSections(List<ResultSection> sections) {
     final buf = StringBuffer();
     for (final s in sections) {
-      if (s.type == const SectionType('translation')) {
+      if (s.type == SectionType.translation) {
         for (final line in (s.data as TranslationData).lines) {
           buf.writeln(line);
         }

@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import '../services/database_helper.dart';
 import '../dictionary/registry.dart';
 import '../dictionary/section.dart';
+import 'widgets/word_content_view.dart';
 
 /// 词条释义详情页
 class WordbookEntryDetailPage extends StatefulWidget {
   final DatabaseHelper dbHelper;
-  final String word;                              // ← registry 参数已删
+  final String word;
 
   const WordbookEntryDetailPage({
     super.key,
@@ -20,7 +21,7 @@ class WordbookEntryDetailPage extends StatefulWidget {
 }
 
 class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
-  String _text = '查询中…';
+  List<ResultSection> _sections = const [];
 
   @override
   void initState() {
@@ -29,21 +30,11 @@ class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
   }
 
   Future<void> _load() async {
-    final dict = DictionaryRegistry.shared.byId(1);   // ← 单例直接拿
-    final sections = await dict?.query(widget.word) ?? const <ResultSection>[];
+    final dict = DictionaryRegistry.shared.byId(1);
+    final sections =
+        await dict?.query(widget.word) ?? const <ResultSection>[];
     if (!mounted) return;
-
-    final buf = StringBuffer();
-    for (final s in sections) {
-      if (s.type == const SectionType('translation')) {
-        for (final line in (s.data as TranslationData).lines) {
-          buf.writeln(line);
-        }
-      }
-    }
-
-    final text = buf.toString().trim();
-    setState(() => _text = text.isEmpty ? '词典中未收录该词' : text);
+    setState(() => _sections = sections);
   }
 
   @override
@@ -52,8 +43,11 @@ class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
       appBar: AppBar(title: Text(widget.word)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Text(_text,
-            style: const TextStyle(fontSize: 18, height: 1.6)),
+        child: WordContentView(
+          word: widget.word,
+          sections: _sections,
+          // chips / onChipTap 不传 → 详情页无候选行，纯内容
+        ),
       ),
     );
   }

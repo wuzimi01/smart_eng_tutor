@@ -10,9 +10,10 @@ import '../services/ocr_flow.dart';
 import '../services/wordbook_service.dart';
 import 'widgets/ocr_image_view.dart';
 import 'widgets/chip_list.dart';
-import 'widgets/word_info_bar.dart';
 import 'wordbook_list_page.dart';
 import '../dictionary/registry.dart';
+import 'settings_page.dart';
+import 'widgets/word_content_view.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,7 +24,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final bool _isMobile = Platform.isAndroid || Platform.isIOS;
-
+  String _hint = '请输入内容...';
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final OcrService _ocrService = OcrService();
   late final WordLookup _lookup = WordLookup(DictionaryRegistry.shared); // ← ① 改
@@ -32,11 +33,10 @@ class _HomePageState extends State<HomePage> {
 
   final TextEditingController _controller = TextEditingController();
 
-  String _displayText = '请输入内容...';
+  LookupResult? _result;   // 查词结果整体保存
   bool _isLoading = true;
   List<String> _chips = [];
   String? _selectedWord;
-  List<String> _tags = [];
   bool _isFavorited = false;
 
   File? _imageFile;
@@ -54,7 +54,7 @@ class _HomePageState extends State<HomePage> {
     final ok = await _dbHelper.init();
     setState(() {
       _isLoading = false;
-      if (!ok) _displayText = '❌ 数据库初始化失败，请检查 assets';
+      if (!ok) _showSnack('❌ 数据库初始化失败，请检查 assets');
     });
     if (_isMobile) _ocrService.ensureInitialized();
     // ← ② 这里不再调 _registry.initAll()：main.dart 已做过，删掉原來那行
@@ -110,9 +110,9 @@ class _HomePageState extends State<HomePage> {
         _imageFile = r.imageFile;
         _imageSize = r.imageSize;
         _ocrWords = r.words;
-        _displayText = r.words.isEmpty
-            ? '未识别到英文单词，请重试或检查图片清晰度'
-            : '点击图片上的单词进行查询（共 ${r.words.length} 个）';
+        _hint = r.words.isEmpty
+          ? '未识别到英文单词，请重试或检查图片清晰度'
+          : '点击图片上的单词进行查询（共 ${r.words.length} 个）';
       });
     } catch (e) {
       if (!mounted) return;
@@ -125,11 +125,11 @@ class _HomePageState extends State<HomePage> {
   Future<void> _search(String word) async {
     if (word.isEmpty) {
       setState(() {
-        _displayText = '请输入内容...';
+        _hint = '请输入内容...';
+        _result = null;
         _chips = [];
         _selectedWord = null;
-        _tags = [];
-        _isFavorited = false; // 清空时熄灭星星
+        _isFavorited = false;
       });
       return;
     }
@@ -142,10 +142,9 @@ class _HomePageState extends State<HomePage> {
           : false;
       if (!mounted) return;
       setState(() {
+        _result = r;                 // ← 整个 LookupResult 保存
         _chips = r.chips;
         _selectedWord = r.selected;
-        _displayText = r.displayText;
-        _tags = r.tags;
         _isFavorited = fav;
       });
     } catch (e) {
@@ -162,9 +161,8 @@ class _HomePageState extends State<HomePage> {
           r.selected != null ? await _wordbook.isFavorited(r.selected!) : false;
       if (!mounted) return;
       setState(() {
+        _result = r;
         _selectedWord = r.selected;
-        _displayText = r.displayText;
-        _tags = r.tags;
         _isFavorited = fav;
       });
     } catch (e) {
@@ -274,24 +272,29 @@ class _HomePageState extends State<HomePage> {
                             ),
                           // 词条结果区：信息栏 + 释义（整体进 WordInfoBar）
                           if (_selectedWord != null && !_isRecognizing) ...[
-                            WordInfoBar(
+                            // 星标行（收藏按钮保留原职责，不并入内容视图）
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: IconButton(
+                                icon: Icon(
+                                  _isFavorited ? Icons.star : Icons.star_border,
+                                  color: _isFavorited ? Colors.amber : Colors.grey,
+                                ),
+                                tooltip: '收藏',
+                                onPressed: _toggleFavorite,
+                              ),
+                            ),
+                            // 统一内容视图：词头 + chips(复用 ChipList 亦可) + 徽章 + 释义
+                            WordContentView(
                               word: _selectedWord!,
-                              isFavorited: _isFavorited,
-                              tags: _tags,
-                              displayText: _displayText,
-                              onToggleFavorite: _toggleFavorite,
+                              sections: _result?.sections ?? const [],
+                              onChipTap: _selectChip,
                             ),
                           ] else
-                            // 没选中词时（空态/提示语）单独显示文本
                             Text(
-                              _displayText,
+                              _hint,
                               textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 24,
-                                color: _displayText == '请输入内容...'
-                                    ? Colors.grey
-                                    : Colors.black87,
-                              ),
+                              style: const TextStyle(fontSize: 24, color: Colors.grey),
                             ),
                         ],
                       ),
@@ -306,6 +309,12 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('Smart English Tutor'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: '设置',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const SettingsPage())),
+          ),
           IconButton(
             icon: const Icon(Icons.menu_book),
             tooltip: '我的词库',

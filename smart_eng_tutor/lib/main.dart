@@ -5,19 +5,18 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart'
     show sqfliteFfiInit, databaseFactoryFfi;
 import 'pages/home_page.dart';
 import 'dictionary/registry.dart';
+import 'settings/display_settings.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();   // async 里用插件前必须初始化绑定
+  WidgetsFlutterBinding.ensureInitialized();
 
-  // 桌面端：sqflite 需要 FFI 实现（Windows / Linux / macOS）
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
 
-  // 词典只在这里 init 一次（拷贝/打开 stardict.db、lemma.en.db）
+  await DisplaySettings.shared.init();      // ← 新增
   await DictionaryRegistry.shared.initAll();
-
   runApp(const MainApp());
 }
 
