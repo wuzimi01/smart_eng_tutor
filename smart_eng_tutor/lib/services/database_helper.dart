@@ -6,6 +6,9 @@ import 'package:path/path.dart' show join, dirname;
 import 'models.dart';
 
 class DatabaseHelper {
+  /// 本词典在多词典体系中的 ID（多词典功能预留）
+  /// 与 assets 词典、生成考纲词库.py 中 DICT_ID 保持一致
+  static const int dictId = 1;
   Database? _lemmaDb;
   Database? _dictDb;
 
@@ -154,7 +157,7 @@ class DatabaseHelper {
   }
 
   /// 收藏。返回 'added' 新收藏 / 'exists' 已存在 / 'error' 出错
-    Future<String> addWord(String word, {int? bookId, int? dictId}) async {
+  Future<String> addWord(String word, {int? bookId, int? dictId}) async {
     if (_bookDb == null) return 'error';
     try {
       final bid = bookId ?? await _defaultBookId();
@@ -162,7 +165,7 @@ class DatabaseHelper {
         'wordbook_words',
         {
           'bookId': bid,
-          'dictId': dictId,
+          'dictId': dictId ?? dictId, // ← 未显式指定时写本词典 ID（1）
           'word': word,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -172,6 +175,7 @@ class DatabaseHelper {
       return 'error';
     }
   }
+
 
   /// 取消收藏
   Future<bool> removeWord(String word, {int? bookId}) async {
@@ -238,7 +242,7 @@ class DatabaseHelper {
 
   Map<String, Object?> _wordRow(WordbookEntry e, int targetBookId) => {
         'bookId': targetBookId,
-        'dictId': e.dictId, // dictId 随词走
+        'dictId': e.dictId, // 词典 ID 随词走（多词典功能预留，本词典 = 1）
         'word': e.word,
       };
 
