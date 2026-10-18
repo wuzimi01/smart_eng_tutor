@@ -1,15 +1,16 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../services/ocr_service.dart';
+
+import 'package:smart_eng_tutor/services/ocr/ocr_recognizer.dart';
 
 class RotatePreviewPage extends StatefulWidget {
   final File sourceFile;
-  final OcrService ocrService;
+  final OcrRecognizer ocrRecognizer;
 
   const RotatePreviewPage({
     super.key,
     required this.sourceFile,
-    required this.ocrService,
+    required this.ocrRecognizer,
   });
 
   @override

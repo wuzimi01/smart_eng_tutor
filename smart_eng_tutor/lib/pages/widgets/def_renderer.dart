@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../dictionary/section.dart';
-import '../../settings/display_settings.dart';
+
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
+
 
 /// 通用词典结果渲染：按设置过滤，按类型排版；未知类型忽略。
 class SectionsView extends StatelessWidget {

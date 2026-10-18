@@ -56,3 +56,19 @@ class ResultSection {
     this.sortHint,
   });
 }
+/// 一次查词的完整结果：候选词根、当前选中、释义 sections、考纲标签
+class LookupResult {
+  final List<String> chips;      // 词根候选（含原词）
+  final String? selected;        // 实际命中的词（null = 全部未命中）
+  final List<ResultSection> sections;  // 选中词的释义板块
+  final List<String> tags;       // 考纲代码（供徽章快捷显示）
+  final String displayText;      // 纯文本释义（未命中时为提示语）
+
+  const LookupResult({
+    required this.chips,
+    this.selected,
+    this.sections = const [],
+    this.tags = const [],
+    required this.displayText,
+  });
+}

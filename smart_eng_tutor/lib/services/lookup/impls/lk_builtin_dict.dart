@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' show join, dirname;
-import '../dictionary.dart';
-import '../section.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 
 /// 本词典（id=1）：stardict.db（释义+tag）+ lemma.en.db（词根）
 class BuiltinDict extends Dictionary {

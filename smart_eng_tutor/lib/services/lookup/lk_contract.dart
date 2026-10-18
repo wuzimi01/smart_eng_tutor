@@ -1,4 +1,5 @@
-import 'section.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
+
 
 /// 词典契约（公开 API：一旦定下按兼容方式演进）
 abstract class Dictionary {

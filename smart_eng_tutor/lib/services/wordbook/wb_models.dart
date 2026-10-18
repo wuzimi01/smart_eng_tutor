@@ -1,12 +1,3 @@
-import 'dart:ui';
-
-/// OCR 识别出的单词（含在原图中的位置）
-class OcrWord {
-  final String text;
-  final Rect rect;
-  const OcrWord(this.text, this.rect);
-}
-
 /// 词库（当前只有默认词库，为多词库预留）
 class Wordbook {
   final int id;
@@ -32,4 +23,3 @@ class WordbookEntry {
     required this.word,
   });
 }
-

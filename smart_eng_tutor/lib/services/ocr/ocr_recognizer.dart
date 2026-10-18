@@ -2,10 +2,10 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/painting.dart'; // Rect / Size
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'image_processor.dart'; // PreprocessResult
-import 'models.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_preprocessor.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_models.dart';
 
-class OcrService {
+class OcrRecognizer {
   TextRecognizer? _recognizer;
   final ImageProcessor _processor = ImageProcessor(); // ← 委托预处理
 

@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../dictionary/section.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';  // SectionType
 
 /// 显示开关：某词典的某类内容是否显示。
 /// key: "show.《dictId》.《typeName》"，默认开。

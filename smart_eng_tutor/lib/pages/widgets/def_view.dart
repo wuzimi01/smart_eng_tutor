@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../dictionary/section.dart';
-import '../../settings/display_settings.dart';
-import 'sections_view.dart';
+
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
+import 'package:smart_eng_tutor/pages/widgets/def_renderer.dart';
+
 
 /// 词条内容统一视图：首页释义区、词库词条详情页共用同一 UI。
 ///

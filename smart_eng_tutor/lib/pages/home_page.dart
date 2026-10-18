@@ -2,18 +2,19 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../services/models.dart';
-import '../services/database_helper.dart';
-import '../services/ocr_service.dart';
-import '../services/word_lookup.dart';
-import '../services/ocr_flow.dart';
-import '../services/wordbook_service.dart';
-import 'widgets/ocr_image_view.dart';
-import 'widgets/chip_list.dart';
-import 'wordbook_list_page.dart';
-import '../dictionary/registry.dart';
-import 'settings_page.dart';
-import 'widgets/word_content_view.dart';
+import 'package:smart_eng_tutor/pages/widgets/chip_list.dart';
+import 'package:smart_eng_tutor/pages/widgets/ocr_image_view.dart';
+import 'package:smart_eng_tutor/pages/widgets/def_view.dart';
+import 'package:smart_eng_tutor/pages/settings_page.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_recognizer.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_service.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_models.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_service.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_lookup.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
+import 'package:smart_eng_tutor/pages/wordbook_list_page.dart';      // ← 补：错误 6
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';   // ← 补：错误 1
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -25,11 +26,12 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final bool _isMobile = Platform.isAndroid || Platform.isIOS;
   String _hint = '请输入内容...';
-  final DatabaseHelper _dbHelper = DatabaseHelper();
-  final OcrService _ocrService = OcrService();
-  late final WordLookup _lookup = WordLookup(DictionaryRegistry.shared); // ← ① 改
-  late final OcrFlow _ocrFlow = OcrFlow(_ocrService);
-  late final WordbookService _wordbook = WordbookService(_dbHelper);
+  final WordbookDatabase __wordbookDb = WordbookDatabase();
+  final OcrRecognizer _ocrRecognizer = OcrRecognizer();
+  late final WordLookup _lookup = WordLookup(DictionaryRegistry.shared);   // 现在能解析了
+  late final OcrService _ocrService = OcrService(_ocrRecognizer);          // 字段名就是 _ocrService
+  late final WordbookService _wordbook = WordbookService(__wordbookDb);
+
 
   final TextEditingController _controller = TextEditingController();
 
@@ -51,12 +53,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _init() async {
-    final ok = await _dbHelper.init();
+    final ok = await __wordbookDb.init();
     setState(() {
       _isLoading = false;
       if (!ok) _showSnack('❌ 数据库初始化失败，请检查 assets');
     });
-    if (_isMobile) _ocrService.ensureInitialized();
+    if (_isMobile) _ocrRecognizer.ensureInitialized();   // ← _ocrService → _ocrRecognizer
+
     // ← ② 这里不再调 _registry.initAll()：main.dart 已做过，删掉原來那行
   }
 
@@ -102,7 +105,8 @@ class _HomePageState extends State<HomePage> {
   Future<void> _pickAndRecognize(ImageSource source) async {
     setState(() => _isRecognizing = true);
     try {
-      final r = await _ocrFlow.run(context, source);
+      final r = await _ocrService.run(context, source);    // ← _ocrFlow → _ocrService
+
       if (!mounted) return;
       setState(() => _isRecognizing = false);
       if (r == null) return;
@@ -215,8 +219,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _controller.dispose();
-    _dbHelper.dispose();
-    _ocrService.dispose();
+    __wordbookDb.dispose();
+    _ocrRecognizer.dispose();
     // ← ③ 删掉 _registry.disposeAll()：词典活到 app 退出，不随页面销毁
     super.dispose();
   }
@@ -322,7 +326,7 @@ class _HomePageState extends State<HomePage> {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => WordbookListPage(dbHelper: _dbHelper),
+                  builder: (_) => WordbookListPage(wordbookDb: __wordbookDb),
                 ),
               );
               // 返回后按当前选中词刷新星星

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import '../dictionary/section.dart';
-import '../dictionary/registry.dart';
-import '../settings/display_settings.dart';
+
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';   // SectionType
+
+
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});

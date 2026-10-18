@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import '../services/database_helper.dart';
-import '../services/models.dart';
-import 'wordbook_entry_list_page.dart';
+
+import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
+import 'package:smart_eng_tutor/pages/wordbook_entry_list_page.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
 
 /// 词库列表页（新增/删除词库，点击词库 → 词条列表）
 class WordbookListPage extends StatefulWidget {
-  final DatabaseHelper dbHelper;
-  const WordbookListPage({super.key, required this.dbHelper});
+  final WordbookDatabase _wordbookDb;
+  const WordbookListPage({super.key, required this._wordbookDb});
 
   @override
   State<WordbookListPage> createState() => _WordbookListPageState();
@@ -23,7 +24,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
   }
 
   Future<void> _load() async {
-    final books = await widget.dbHelper.queryWordbooks();
+    final books = await widget._wordbookDb.queryWordbooks();
     if (!mounted) return;
     setState(() {
       _books = books;
@@ -69,7 +70,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
       },
     );
     if (name == null || name.trim().isEmpty) return;
-    final id = await widget.dbHelper.createBook(name);
+    final id = await widget._wordbookDb.createBook(name);
     if (!mounted) return;
     if (id == null) {
       _showSnack('创建失败：词库名「${name.trim()}」已存在');
@@ -98,7 +99,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
       ),
     );
     if (ok != true) return;
-    final done = await widget.dbHelper.deleteBook(b.id);
+    final done = await widget._wordbookDb.deleteBook(b.id);
     if (!mounted) return;
     _showSnack(done ? '已删除词库「${b.name}」' : '默认词库不可删除');
     _load();
@@ -149,7 +150,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
                             context,
                             MaterialPageRoute(
                               builder: (_) => WordbookEntryListPage(
-                                dbHelper: widget.dbHelper,
+                                wordbookDb: widget._wordbookDb,
                                 bookId: b.id,
                                 bookName: b.name,
                               ),

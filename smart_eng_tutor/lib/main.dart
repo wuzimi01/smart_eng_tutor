@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:sqflite/sqflite.dart' show databaseFactory;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'
     show sqfliteFfiInit, databaseFactoryFfi;
-import 'pages/home_page.dart';
-import 'dictionary/registry.dart';
-import 'settings/display_settings.dart';
+import 'package:smart_eng_tutor/pages/home_page.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

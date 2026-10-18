@@ -1,5 +1,6 @@
-import 'dictionary.dart';
-import 'impls/builtin_dict.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
+import 'package:smart_eng_tutor/services/lookup/impls/lk_builtin_dict.dart';
+
 
 /// 词典注册中心 —— 全 app 唯一知道具体词典的文件。
 /// 单例：全局只有一份，通过 [shared] 访问。

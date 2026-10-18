@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../../services/models.dart';
+
+import 'package:smart_eng_tutor/services/ocr/ocr_models.dart';
+
 
 /// 图片取词区：显示预处理图 + 单词点击框叠加层
 ///

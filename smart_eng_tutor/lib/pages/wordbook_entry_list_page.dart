@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
-import '../services/database_helper.dart';
-import '../services/models.dart';
-import 'wordbook_entry_detail_page.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
+import 'package:smart_eng_tutor/pages/wordbook_entry_detail_page.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
 
 /// 词条列表页（点击词条 → 释义详情；长按进入批量选择模式）
 class WordbookEntryListPage extends StatefulWidget {
-  final DatabaseHelper dbHelper;
+  final WordbookDatabase _wordbookDb;
   final int bookId;
   final String bookName;
   const WordbookEntryListPage({
     super.key,
-    required this.dbHelper,
+    required this._wordbookDb,
     required this.bookId,
     required this.bookName,
   });
@@ -35,7 +35,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
   }
 
   Future<void> _load() async {
-    final entries = await widget.dbHelper.queryEntries(widget.bookId);
+    final entries = await widget._wordbookDb.queryEntries(widget.bookId);
     if (!mounted) return;
     setState(() {
       _entries = entries;
@@ -73,7 +73,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
       ),
     );
     if (ok != true) return;
-    final n = await widget.dbHelper.deleteWords(sel.map((e) => e.id).toList());
+    final n = await widget._wordbookDb.deleteWords(sel.map((e) => e.id).toList());
     if (!mounted) return;
     _showSnack('已删除 $n 个词条');
     _load();
@@ -81,7 +81,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
 
   /// 弹出目标词库选择框，返回选中的词库 id（null = 取消）
   Future<int?> _pickTargetBook() async {
-    final books = await widget.dbHelper.queryOtherBooks(widget.bookId);
+    final books = await widget._wordbookDb.queryOtherBooks(widget.bookId);
     if (!mounted) return null;
     if (books.isEmpty) {
       _showSnack('没有其他词库，请先在词库页新建');
@@ -104,7 +104,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
   Future<void> _batchCopy() async {
     final target = await _pickTargetBook();
     if (target == null) return;
-    final n = await widget.dbHelper.copyWords(_selectedEntries, target);
+    final n = await widget._wordbookDb.copyWords(_selectedEntries, target);
     if (!mounted) return;
     _showSnack('已复制 $n 个词条');
     _exitSelectMode();
@@ -113,7 +113,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
   Future<void> _batchMove() async {
     final target = await _pickTargetBook();
     if (target == null) return;
-    final n = await widget.dbHelper.moveWords(_selectedEntries, target);
+    final n = await widget._wordbookDb.moveWords(_selectedEntries, target);
     if (!mounted) return;
     _showSnack('已移动 $n 个词条');
     _load();
@@ -176,7 +176,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
                               context,
                               MaterialPageRoute(
                                 builder: (_) => WordbookEntryDetailPage(
-                                  dbHelper: widget.dbHelper,
+                                  wordbookDb: widget._wordbookDb,
                                   word: e.word,
                                 ),
                               ),

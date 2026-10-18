@@ -1,22 +1,6 @@
-import '../dictionary/registry.dart';
-import '../dictionary/dictionary.dart';
-import '../dictionary/section.dart';
-
-/// 一次查询的完整结果（字段与旧版一致，UI 无感）
-class LookupResult {
-  final List<String> chips;
-  final String? selected;
-  final String displayText;
-  final List<String> tags;
-  final List<ResultSection> sections; // 新增：本批先附带，下一批 UI 切换用
-  const LookupResult({
-    required this.chips,
-    this.selected,
-    required this.displayText,
-    this.tags = const [],
-    this.sections = const [],
-  });
-}
+import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
 
 /// 查词业务：词根扩展 → 去重 → 逐个查释义（经注册中心）
 class WordLookup {

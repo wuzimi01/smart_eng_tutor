@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
-import '../services/database_helper.dart';
-import '../dictionary/registry.dart';
-import '../dictionary/section.dart';
-import 'widgets/word_content_view.dart';
+
+import 'package:smart_eng_tutor/pages/widgets/def_view.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';      // ResultSection
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';    // DictionaryRegistry
 
 /// 词条释义详情页
 class WordbookEntryDetailPage extends StatefulWidget {
-  final DatabaseHelper dbHelper;
+  final WordbookDatabase wordbookDb;
   final String word;
 
   const WordbookEntryDetailPage({
     super.key,
-    required this.dbHelper,
+    required this.wordbookDb,
     required this.word,
   });
 

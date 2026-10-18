@@ -3,11 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' show join, dirname;
-import 'models.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
 
 /// 只负责 wordbook.db（收藏、词库管理）。
 /// 词典数据（stardict.db / lemma.en.db）已移交 lib/dictionary/ 各词典自管。
-class DatabaseHelper {
+class WordbookDatabase {
   Database? _bookDb;
   late final String _docPath;
 
