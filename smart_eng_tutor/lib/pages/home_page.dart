@@ -1,10 +1,20 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../models.dart';
-import '../database_helper.dart';
-import '../ocr_service.dart';
-import 'rotate_preview_page.dart';
+import 'package:smart_eng_tutor/pages/widgets/chip_list.dart';
+import 'package:smart_eng_tutor/pages/widgets/ocr_image_view.dart';
+import 'package:smart_eng_tutor/pages/widgets/def_view.dart';
+import 'package:smart_eng_tutor/pages/settings_page.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_recognizer.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_service.dart';
+import 'package:smart_eng_tutor/services/ocr/ocr_models.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_service.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_lookup.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
+import 'package:smart_eng_tutor/pages/wordbook_list_page.dart';      // ← 补：错误 6
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';   // ← 补：错误 1
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -15,20 +25,23 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final bool _isMobile = Platform.isAndroid || Platform.isIOS;
+  String _hint = '请输入内容...';
+  final WordbookDatabase __wordbookDb = WordbookDatabase();
+  final OcrRecognizer _ocrRecognizer = OcrRecognizer();
+  late final WordLookup _lookup = WordLookup(DictionaryRegistry.shared);   // 现在能解析了
+  late final OcrService _ocrService = OcrService(_ocrRecognizer);          // 字段名就是 _ocrService
+  late final WordbookService _wordbook = WordbookService(__wordbookDb);
 
-  // 服务
-  final DatabaseHelper _dbHelper = DatabaseHelper();
-  final OcrService _ocrService = OcrService();
-  final ImagePicker _picker = ImagePicker();
+
   final TextEditingController _controller = TextEditingController();
 
-  String _displayText = '请输入内容...';
+  LookupResult? _result;   // 查词结果整体保存
   bool _isLoading = true;
   List<String> _chips = [];
   String? _selectedWord;
+  bool _isFavorited = false;
 
   File? _imageFile;
-  int _quarterTurns = 0; // ← 新增：旋转转数
   Size _imageSize = Size.zero;
   List<OcrWord> _ocrWords = [];
   bool _isRecognizing = false;
@@ -40,16 +53,31 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _init() async {
-    final ok = await _dbHelper.init();
+    final ok = await __wordbookDb.init();
     setState(() {
       _isLoading = false;
-      if (!ok) _displayText = '❌ 数据库初始化失败，请检查 assets';
+      if (!ok) _showSnack('❌ 数据库初始化失败，请检查 assets');
     });
-    if (_isMobile) _ocrService.ensureInitialized();
+    if (_isMobile) _ocrRecognizer.ensureInitialized();   // ← _ocrService → _ocrRecognizer
+
+    // ← ② 这里不再调 _registry.initAll()：main.dart 已做过，删掉原來那行
+  }
+
+  // ==================== 提示条 ====================
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(milliseconds: 1800),
+        ),
+      );
   }
 
   // ==================== OCR 流程 ====================
-
   Future<void> _showImageSourceDialog() async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -75,154 +103,111 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _pickAndRecognize(ImageSource source) async {
+    setState(() => _isRecognizing = true);
     try {
-      final XFile? picked = await _picker.pickImage(
-        source: source,
-        imageQuality: 100,
-        maxWidth: 8192, // ← 新增：保证 OCR 用图分辨率
-      );
-      if (picked == null) return;
+      final r = await _ocrService.run(context, source);    // ← _ocrFlow → _ocrService
 
-      // 旋转预览：返回 (原图, 转数)
-      final result = await Navigator.push<(File, int)>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => RotatePreviewPage(
-            sourceFile: File(picked.path),
-            ocrService: _ocrService,
-          ),
-        ),
-      );
-      // if (result == null) return;
-      // final (file, turns) = result;
-
-      // setState(() {
-      //   _isRecognizing = true;
-      //   _imageFile = file;
-      //   _quarterTurns = turns;
-      //   _ocrWords = [];
-      //   _displayText = '🔍 正在识别图片中的文字...';
-      // });
-
-      // // 显示尺寸按旋转后计算
-      // final s = await _ocrService.readImageSize(file);
-      // _imageSize = turns.isOdd ? Size(s.height, s.width) : s;
-
-      // // OCR 使用预处理增强图（旋转 + 去红笔 + 二值化）
-      // final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
-      // final words = await _ocrService.recognize(prep.file);
-
-      // // 把增强图坐标系换算回"旋转后原图"坐标系
-      // setState(() {
-      //   _isRecognizing = false;
-      //   _ocrWords = words
-      //       .map((w) => OcrWord(
-      //             w.text,
-      //             Rect.fromLTRB(
-      //               w.rect.left,
-      //               w.rect.top,
-      //               w.rect.right,
-      //               w.rect.bottom,
-      //             ),
-      //           ))
-      //       .toList();
-      //   _displayText = words.isEmpty
-      //       ? '未识别到英文单词，请重试或检查图片清晰度'
-      //       : '点击图片上的单词进行查询（共 ${words.length} 个）';
-      // });
-    if (result == null) return;
-    final (file, turns) = result;
-
-    // 预处理（内部已按 turns 旋转 + 去红笔 + 二值化）
-    final prep = await _ocrService.preprocessImage(file, quarterTurns: turns);
-    final words = await _ocrService.recognize(prep.file);
-
-    final s = await _ocrService.readImageSize(prep.file); // 预处理图尺寸
-
-    setState(() {
-      _isRecognizing = false;
-      _imageFile = prep.file;
-      _quarterTurns = 0;                 // 图已转正，UI 不用再转
-      _imageSize = s;                    // 不再需要 turns.isOdd 宽高互换
-      _ocrWords = words
-          .map((w) => OcrWord(
-                w.text,
-                Rect.fromLTRB(
-                  w.rect.left, w.rect.top, w.rect.right, w.rect.bottom,
-                ),
-              ))
-          .toList();
-      _displayText = words.isEmpty
-          ? '未识别到英文单词，请重试或检查图片清晰度'
-          : '点击图片上的单词进行查询（共 ${words.length} 个）';
-    });
-//11111111111111111111111111
-    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isRecognizing = false);
+      if (r == null) return;
       setState(() {
-        _isRecognizing = false;
-        _displayText = '❌ OCR 识别失败: $e';
+        _imageFile = r.imageFile;
+        _imageSize = r.imageSize;
+        _ocrWords = r.words;
+        _hint = r.words.isEmpty
+          ? '未识别到英文单词，请重试或检查图片清晰度'
+          : '点击图片上的单词进行查询（共 ${r.words.length} 个）';
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isRecognizing = false);
+      _showSnack('❌ OCR 识别失败: $e');
     }
   }
 
   // ==================== 搜索逻辑 ====================
-
   Future<void> _search(String word) async {
     if (word.isEmpty) {
       setState(() {
-        _displayText = '请输入内容...';
+        _hint = '请输入内容...';
+        _result = null;
         _chips = [];
         _selectedWord = null;
+        _isFavorited = false;
       });
       return;
     }
 
     try {
-      final stems = await _dbHelper.queryStems(word);
-      final candidates = <String>[word, ...stems];
-      final unique = <String>[];
-      for (final c in candidates) {
-        if (!unique.contains(c)) unique.add(c);
-      }
-
+      final r = await _lookup.search(word);
+      if (!mounted) return;
+      final fav = r.selected != null
+          ? await _wordbook.isFavorited(r.selected!)
+          : false;
+      if (!mounted) return;
       setState(() {
-        _chips = unique;
-        _selectedWord = null;
-      });
-
-      for (final c in unique) {
-        final trans = await _dbHelper.queryTranslation(c);
-        if (trans != null) {
-          await _selectChip(c);
-          return;
-        }
-      }
-
-      setState(() {
-        _selectedWord = null;
-        _displayText = '未找到释义';
+        _result = r;                 // ← 整个 LookupResult 保存
+        _chips = r.chips;
+        _selectedWord = r.selected;
+        _isFavorited = fav;
       });
     } catch (e) {
-      setState(() => _displayText = '查询出错: $e');
+      _showSnack('查询出错: $e');
     }
   }
 
   Future<void> _selectChip(String word) async {
-    setState(() => _selectedWord = word);
     try {
-      final trans = await _dbHelper.queryTranslation(word);
-      if (trans == null) {
-        setState(() => _displayText = '「$word」没有释义');
-        return;
-      }
-      final buffer = StringBuffer();
-      for (final row in trans) {
-        buffer.writeln(row['word']);
-        buffer.writeln(row['translation']);
-      }
-      setState(() => _displayText = buffer.toString().trim());
+      final r = await _lookup.select(word);
+      if (!mounted) return;
+      // 先查收藏状态，再一次性 setState —— 星星、徽章和释义同帧更新
+      final fav =
+          r.selected != null ? await _wordbook.isFavorited(r.selected!) : false;
+      if (!mounted) return;
+      setState(() {
+        _result = r;
+        _selectedWord = r.selected;
+        _isFavorited = fav;
+      });
     } catch (e) {
-      setState(() => _displayText = '查询出错: $e');
+      _showSnack('查询出错: $e');
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    final word = _selectedWord;
+    if (word == null) return;
+    try {
+      final r = await _wordbook.toggle(word);
+      if (!mounted) return;
+      // 以数据库的真实状态为准，而不是假设翻转成功
+      final real = await _wordbook.isFavorited(word);
+      if (!mounted) return;
+      setState(() => _isFavorited = real);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(r.message),
+            duration: const Duration(milliseconds: 1200),
+            behavior: SnackBarBehavior.floating,
+            width: 260,
+            action: real
+                ? SnackBarAction(
+                    label: '撤销',
+                    onPressed: () async {
+                      await _wordbook.toggle(word);
+                      if (!mounted) return;
+                      final still = await _wordbook.isFavorited(word);
+                      if (!mounted) return;
+                      setState(() => _isFavorited = still);
+                    },
+                  )
+                : null,
+          ),
+        );
+    } catch (e) {
+      _showSnack('收藏出错: $e');
     }
   }
 
@@ -234,13 +219,13 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _controller.dispose();
-    _dbHelper.dispose();
-    _ocrService.dispose();
+    __wordbookDb.dispose();
+    _ocrRecognizer.dispose();
+    // ← ③ 删掉 _registry.disposeAll()：词典活到 app 退出，不随页面销毁
     super.dispose();
   }
 
   // ==================== UI ====================
-
   @override
   Widget build(BuildContext context) {
     final body = SafeArea(
@@ -263,44 +248,18 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           if (_chips.isNotEmpty)
-            SizedBox(
-              height: 48,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: _chips.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final word = _chips[index];
-                  final selected = word == _selectedWord;
-                  return InkWell(
-                    borderRadius: BorderRadius.circular(20),
-                    onTap: () => _selectChip(word),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? Colors.blue
-                            : Colors.blue.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        word,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: selected ? Colors.white : Colors.blue,
-                          fontWeight:
-                              selected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
+            ChipList(
+              chips: _chips,
+              selectedWord: _selectedWord,
+              onSelect: _selectChip,
             ),
-          if (_isMobile && _imageFile != null) _buildImageWithWords(),
+          if (_isMobile && _imageFile != null)
+            OcrImageView(
+              imageFile: _imageFile!,
+              imageSize: _imageSize,
+              words: _ocrWords,
+              onWordTap: _onTapOcrWord,
+            ),
           Expanded(
             child: Center(
               child: _isLoading
@@ -315,16 +274,32 @@ class _HomePageState extends State<HomePage> {
                               padding: EdgeInsets.all(16),
                               child: CircularProgressIndicator(),
                             ),
-                          Text(
-                            _displayText,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 24,
-                              color: _displayText == '请输入内容...'
-                                  ? Colors.grey
-                                  : Colors.black87,
+                          // 词条结果区：信息栏 + 释义（整体进 WordInfoBar）
+                          if (_selectedWord != null && !_isRecognizing) ...[
+                            // 星标行（收藏按钮保留原职责，不并入内容视图）
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: IconButton(
+                                icon: Icon(
+                                  _isFavorited ? Icons.star : Icons.star_border,
+                                  color: _isFavorited ? Colors.amber : Colors.grey,
+                                ),
+                                tooltip: '收藏',
+                                onPressed: _toggleFavorite,
+                              ),
                             ),
-                          ),
+                            // 统一内容视图：词头 + chips(复用 ChipList 亦可) + 徽章 + 释义
+                            WordContentView(
+                              word: _selectedWord!,
+                              sections: _result?.sections ?? const [],
+                              onChipTap: _selectChip,
+                            ),
+                          ] else
+                            Text(
+                              _hint,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 24, color: Colors.grey),
+                            ),
                         ],
                       ),
                     ),
@@ -334,108 +309,49 @@ class _HomePageState extends State<HomePage> {
       ),
     );
 
-    if (_isMobile) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Smart English Tutor'),
-          actions: [
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Smart English Tutor'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: '设置',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const SettingsPage())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.menu_book),
+            tooltip: '我的词库',
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => WordbookListPage(wordbookDb: __wordbookDb),
+                ),
+              );
+              // 返回后按当前选中词刷新星星
+              final w = _selectedWord;
+              if (w != null && mounted) {
+                final fav = await _wordbook.isFavorited(w);
+                if (mounted) setState(() => _isFavorited = fav);
+              }
+            },
+          ),
+          if (_isMobile) ...[
             IconButton(
               icon: _isRecognizing
                   ? const SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.photo_camera),
               tooltip: '拍照选词',
               onPressed: _isRecognizing ? null : _showImageSourceDialog,
             ),
           ],
-        ),
-        body: body,
-      );
-    }
-    return Scaffold(body: body);
-  }
-
-  Widget _buildImageWithWords() {
-    return Expanded(
-      flex: 3,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (_imageSize == Size.zero) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final scaleX = constraints.maxWidth / _imageSize.width;
-            final scaleY = constraints.maxHeight / _imageSize.height;
-            final scale = scaleX < scaleY ? scaleX : scaleY;
-            final displayW = _imageSize.width * scale;
-            final displayH = _imageSize.height * scale;
-
-            return Center(
-              child: InteractiveViewer(
-                panEnabled: true,
-                scaleEnabled: true,
-                minScale: 1.0,
-                maxScale: 5.0,
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                child: SizedBox(
-                  width: displayW,
-                  height: displayH,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        // ← 改：原图 + RotatedBox，与 OCR 坐标系（旋转后空间）对齐
-                        child: RotatedBox(
-                          quarterTurns: _quarterTurns,
-                          child: Image.file(_imageFile!, fit: BoxFit.fill, filterQuality: FilterQuality.high),
-                        ),
-                      ),
-                      ..._ocrWords.map((w) {
-                        return Positioned(
-                          left: w.rect.left * scale,
-                          top: w.rect.top * scale,
-                          width: w.rect.width * scale,
-                          height: w.rect.height * scale,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: () => _onTapOcrWord(w.text),
-                              borderRadius: BorderRadius.circular(4),
-                              child: Container(
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                      color: Colors.blue.withOpacity(0.6)),
-                                ),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    w.text,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.blue,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
+        ],
       ),
+      body: body,
     );
   }
 }
