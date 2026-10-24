@@ -72,3 +72,11 @@ class LookupResult {
     required this.displayText,
   });
 }
+
+/// 复习卡片：正反面都是多行文本
+class ReviewCard {
+  final String front; // 正面（蒙住的内容的对立面）
+  final String back;  // 背面
+  final bool isMain;  // 主卡（单词本身）还是词块卡
+  const ReviewCard({required this.front, required this.back, this.isMain = false});
+}

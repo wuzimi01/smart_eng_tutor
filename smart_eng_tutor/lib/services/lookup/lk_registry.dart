@@ -1,16 +1,17 @@
 import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
 import 'package:smart_eng_tutor/services/lookup/impls/lk_builtin_dict.dart';
-
+import 'package:smart_eng_tutor/services/lookup/impls/lk_complete_guide_dict.dart';
 
 /// 词典注册中心 —— 全 app 唯一知道具体词典的文件。
 /// 单例：全局只有一份，通过 [shared] 访问。
 class DictionaryRegistry {
   // ===== 单例 =====
-  DictionaryRegistry._();          // 私有构造：禁止外部 new
+  DictionaryRegistry._(); // 私有构造：禁止外部 new
   static final DictionaryRegistry shared = DictionaryRegistry._();
 
   final List<Dictionary> _dicts = [
     BuiltinDict(),
+    CompleteGuideDict(), // 全攻略（id=2）
   ];
 
   List<Dictionary> get all => List.unmodifiable(_dicts);

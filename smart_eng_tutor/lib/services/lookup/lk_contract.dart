@@ -1,6 +1,5 @@
 import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 
-
 /// 词典契约（公开 API：一旦定下按兼容方式演进）
 abstract class Dictionary {
   int get id;
@@ -17,6 +16,12 @@ abstract class Dictionary {
 
   /// 词根/原型查询（查词策略层用；无此能力的词典返回空）
   Future<List<String>> queryStems(String word) async => [];
+
+  /// 词典范围内取词（批量导入词库用）；无此能力的词典返回空列表
+  Future<List<String>> queryRange(String from, String to) async => [];
+
+  /// 取某词的复习卡片（主卡 + 词块卡）。无此能力的词典返回空列表。
+  Future<List<ReviewCard>> queryCards(String word) async => [];
 
   Future<void> dispose();
 }

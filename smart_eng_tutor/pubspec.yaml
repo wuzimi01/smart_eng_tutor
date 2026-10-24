@@ -29,3 +29,4 @@ flutter:
     - assets/lemma.en.db
     - assets/stardict.db
     - assets/wordbook.db
+    - assets/Complete_Guide.db

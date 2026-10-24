@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' show join, dirname;
 import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
 
 /// 只负责 wordbook.db（收藏、词库管理）。
 /// 词典数据（stardict.db / lemma.en.db）已移交 lib/dictionary/ 各词典自管。
@@ -26,8 +27,7 @@ class WordbookDatabase {
       await dbDir.create(recursive: true);
     }
     final data = await rootBundle.load(assetPath);
-    final bytes =
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
     await File(dbPath).writeAsBytes(bytes);
   }
 
@@ -45,6 +45,7 @@ class WordbookDatabase {
         }
       }
       _bookDb = await openDatabase(bookPath, version: 1);
+      await _ensureExtraSchema();
       // 幂等兜底：assets 的 db 可能没有默认词库
       await _bookDb!.insert('wordbooks', {'name': '默认词库'},
           conflictAlgorithm: ConflictAlgorithm.ignore);
@@ -80,9 +81,7 @@ class WordbookDatabase {
     if (_bookDb == null) return false;
     final bid = bookId ?? await _defaultBookId();
     final rows = await _bookDb!.query('wordbook_words',
-        where: 'bookId = ? AND word = ?',
-        whereArgs: [bid, word],
-        limit: 1);
+        where: 'bookId = ? AND word = ?', whereArgs: [bid, word], limit: 1);
     return rows.isNotEmpty;
   }
 
@@ -147,7 +146,8 @@ class WordbookDatabase {
     if (bookId == await _defaultBookId()) return false;
     final n = await _bookDb!
         .delete('wordbook_words', where: 'bookId = ?', whereArgs: [bookId]);
-    final d = await _bookDb!.delete('wordbooks', where: 'id = ?', whereArgs: [bookId]);
+    final d = await _bookDb!
+        .delete('wordbooks', where: 'id = ?', whereArgs: [bookId]);
     return d > 0 || n > 0;
   }
 
@@ -194,6 +194,120 @@ class WordbookDatabase {
           await txn.delete('wordbook_words', where: 'id = ?', whereArgs: [e.id]);
           n++;
         }
+      }
+    });
+    return n;
+  }
+
+  /// 复习调度表（assets 的 db 没有它，运行时幂等创建）
+  Future<void> _ensureExtraSchema() async {
+    await _bookDb!.execute('''
+      CREATE TABLE IF NOT EXISTS review_schedule(
+        word TEXT NOT NULL,
+        bookId INTEGER NOT NULL,
+        level INTEGER NOT NULL DEFAULT 0,
+        dueAt INTEGER NOT NULL,
+        lastReviewedAt INTEGER,
+        PRIMARY KEY(word, bookId)
+      )
+    ''');
+  }
+
+  // ==================== 批量导入 ====================
+
+  /// 从词典批量导入 [from, to] 范围的单词到指定词库。
+  /// dictId 记为词典自身 id（0=读文章收藏，1=默认词典，2+=导入词典）。
+  /// 返回实际新导入数量。
+  Future<int> importRange(Dictionary dict, String from, String to,
+      {int? bookId}) async {
+    if (_bookDb == null) return 0;
+    final bid = bookId ?? await _defaultBookId();
+    final words = await dict.queryRange(from, to);
+    if (words.isEmpty) return 0;
+    int n = 0;
+    await _bookDb!.transaction((txn) async {
+      for (final w in words) {
+        final id = await txn.insert(
+          'wordbook_words',
+          {'bookId': bid, 'dictId': dict.id, 'word': w},
+          conflictAlgorithm: ConflictAlgorithm.ignore, // 已存在跳过
+        );
+        if (id > 0) n++;
+      }
+    });
+    return n;
+  }
+
+  // ==================== 复习调度 ====================
+
+  /// 某词库内到期需复习的词条（bookId 为 null 时跨词库）
+  Future<List<WordbookEntry>> queryDueReviews({int? bookId, int? limit}) async {
+    if (_bookDb == null) return [];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final where = StringBuffer('WHERE r.dueAt <= ?');
+    final args = <Object?>[now];
+    if (bookId != null) {
+      where.write(' AND s.bookId = ?');
+      args.add(bookId);
+    }
+    final sql = '''
+      SELECT s.id AS id, s.bookId, s.dictId, s.word
+      FROM wordbook_words s
+      JOIN review_schedule r ON r.word = s.word AND r.bookId = s.bookId
+      $where
+      ORDER BY r.dueAt ASC
+    ''';
+    final rows = await _bookDb!.rawQuery(
+      limit != null ? '$sql LIMIT ?' : sql,
+      limit != null ? [...args, limit] : args,
+    );
+    return rows
+        .map((r) => WordbookEntry(
+              id: r['id'] as int,
+              bookId: r['bookId'] as int,
+              dictId: r['dictId'] as int?,
+              word: r['word'] as String,
+            ))
+        .toList();
+  }
+
+  /// 记录一次复习打分。quality: 2=答对 1=不熟练 0=答错
+  Future<void> recordReview(String word, int bookId, int quality) async {
+    if (_bookDb == null) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = await _bookDb!.query('review_schedule',
+        where: 'word = ? AND bookId = ?',
+        whereArgs: [word, bookId],
+        limit: 1);
+    int level = rows.isNotEmpty ? (rows.first['level'] as int) : 0;
+    // 等级调整：答对升级，不熟练持平，答错降一级
+    if (quality >= 2) level++;
+    if (quality == 0 && level > 0) level--;
+    final intervals = const [10 / 1440, 1, 3, 7, 14, 30]; // 天：新词10分钟起
+    final days = intervals[level.clamp(0, intervals.length - 1)];
+    final dueAt = now + (days * 86400000).round();
+    await _bookDb!.insert('review_schedule', {
+      'word': word,
+      'bookId': bookId,
+      'level': level,
+      'dueAt': dueAt,
+      'lastReviewedAt': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// 把某词库全部词条登记为待复习（导入后调用，或词库页手动"加入复习"）
+  Future<int> enrollReviews(int bookId) async {
+    if (_bookDb == null) return 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = await _bookDb!.query('wordbook_words',
+        columns: ['word'], where: 'bookId = ?', whereArgs: [bookId]);
+    int n = 0;
+    await _bookDb!.transaction((txn) async {
+      for (final r in rows) {
+        await txn.insert('review_schedule',
+            {'word': r['word'], 'bookId': bookId, 'level': 0, 'dueAt': now},
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+        n++;
       }
     });
     return n;

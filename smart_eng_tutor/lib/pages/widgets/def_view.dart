@@ -30,9 +30,6 @@ class WordContentView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // sections 里每个 section 自带 dictId，取第一个用于设置过滤
-    final dictId = sections.isNotEmpty ? sections.first.dictId : 1;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -65,7 +62,7 @@ class WordContentView extends StatelessWidget {
         AnimatedBuilder(
           animation: DisplaySettings.shared,
           builder: (_, _) =>
-              SectionsView(dictId: dictId, sections: sections),
+              SectionsView(sections: sections),
         ),
       ],
     );

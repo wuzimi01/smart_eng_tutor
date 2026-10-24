@@ -31,12 +31,15 @@ class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
   }
 
   Future<void> _load() async {
-    final dict = DictionaryRegistry.shared.byId(1);
-    final sections =
-        await dict?.query(widget.word) ?? const <ResultSection>[];
+    final sections = <ResultSection>[];
+    for (final dict in DictionaryRegistry.shared.all) {
+      sections.addAll(await dict.query(widget.word));
+    }
+    sections.sort((a, b) => (a.sortHint ?? 0).compareTo(b.sortHint ?? 0));
     if (!mounted) return;
     setState(() => _sections = sections);
   }
+
 
   @override
   Widget build(BuildContext context) {

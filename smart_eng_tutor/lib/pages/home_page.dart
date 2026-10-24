@@ -15,6 +15,8 @@ import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
 import 'package:smart_eng_tutor/pages/wordbook_list_page.dart';      // ← 补：错误 6
 import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';   // ← 补：错误 1
+import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
+
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -49,7 +51,15 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    DisplaySettings.shared.addListener(_onSettingsChanged); // ← 新增
     _init();
+  }
+
+  void _onSettingsChanged() {
+    // 用当前输入框的词重新查询；若正在 OCR 识别则跳过，避免打断
+    if (_isRecognizing) return;
+    final w = _controller.text.trim();
+    if (w.isNotEmpty) _search(w);
   }
 
   Future<void> _init() async {
@@ -218,10 +228,10 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    DisplaySettings.shared.removeListener(_onSettingsChanged); // ← 新增
     _controller.dispose();
     __wordbookDb.dispose();
     _ocrRecognizer.dispose();
-    // ← ③ 删掉 _registry.disposeAll()：词典活到 app 退出，不随页面销毁
     super.dispose();
   }
 
