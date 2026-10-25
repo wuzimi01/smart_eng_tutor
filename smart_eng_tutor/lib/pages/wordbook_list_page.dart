@@ -124,8 +124,9 @@ class _WordbookListPageState extends State<WordbookListPage> {
 
   // ---------- 从词典批量导入 ----------
   Future<void> _importFromDict(int bookId, String bookName) async {
-    // 选词典（跳过 id=0 读文章收藏、id=1 默认词典，只列导入型词典）
-    final dicts = DictionaryRegistry.shared.all.where((d) => d.id >= 2).toList();
+    // ★ 只列声明了 importable 的词典（默认词典自动排除）
+    final dicts =
+        DictionaryRegistry.shared.all.where((d) => d.importable).toList();
     if (dicts.isEmpty) {
       _showSnack('没有可导入的词典');
       return;

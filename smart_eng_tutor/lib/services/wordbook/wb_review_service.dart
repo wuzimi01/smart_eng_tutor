@@ -3,17 +3,19 @@ import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
 
-/// 一次复习中的一张卡片
 class ReviewItem {
   final WordbookEntry entry;
-  final List<ReviewCard> cards;
+  final List<ReviewCard> cards; // 已按重要度降序
   int cardIdx = 0;
-  ReviewItem(this.entry, this.cards);
+  ReviewItem(this.entry, List<ReviewCard> allCards)
+      : cards = allCards..sort((a, b) => b.importance.compareTo(a.importance)) {
+    if (cards.length > 4) cards.removeRange(4, cards.length); // 单词最多 4 张
+  }
   ReviewCard get card => cards[cardIdx];
   bool get lastCard => cardIdx >= cards.length - 1;
 }
 
-/// 一次复习会话（词 → 展开成卡片队列）
+
 class ReviewSession {
   final List<ReviewItem> items;
   int _idx = 0;
@@ -27,16 +29,17 @@ class ReviewSession {
 
 class ReviewService {
   final WordbookDatabase _wb;
-  final int bookId; // 只复习这个词库
+  final int bookId;
   ReviewService(this._wb, {required this.bookId});
 
-  /// 开始一轮复习：取该词库的到期词，展开成卡片队列
   Future<ReviewSession?> startSession({int maxWords = 20}) async {
     final due = await _wb.queryDueReviews(bookId: bookId, limit: maxWords);
     if (due.isEmpty) return null;
     final items = <ReviewItem>[];
     for (final e in due) {
-      final dict = DictionaryRegistry.shared.byId(e.dictId ?? 1);
+      // 来源词典；找不到（如收藏词 dictId=0）→ 用主词典出卡
+      final dict = DictionaryRegistry.shared.byId(e.dictId ?? 1) ??
+          DictionaryRegistry.shared.byId(1);
       if (dict == null) continue;
       final cards = await dict.queryCards(e.word);
       if (cards.isEmpty) continue;
@@ -45,9 +48,8 @@ class ReviewService {
     return items.isEmpty ? null : ReviewSession(items);
   }
 
-  /// 打分：词内最后一张卡打分时写调度。
-  /// quality: 2=答对 1=不熟练 0=答错
+  /// quality: 2=答对 1=不熟练 0=答错（wb_database 内映射 FSRS Good/Hard/Again）
   Future<void> score(ReviewItem item, int quality) async {
-    await _wb.recordReview(item.entry.word, item.entry.bookId, quality);
+    await _wb.recordReview(item.entry.id, quality);
   }
 }

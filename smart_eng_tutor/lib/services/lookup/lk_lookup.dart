@@ -3,19 +3,17 @@ import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
 
-/// 查词业务：
-/// - 词根扩展 → 去重 → 逐候选查询
-/// - 只查“设置中至少有一类内容开着”的词典；查出的内容再按设置逐板块过滤
-/// - 首页 search/select 与词库详情页共用本类
+/// 查词业务。
+/// 词组命中（如 "look forward to"）时，chips 给出相关单词（首词 "look"）。
+/// 词条详情页共用 [_sectionsFrom] / relatedWords，只是查询范围不同。
 class WordLookup {
   final DictionaryRegistry registry;
   final DisplaySettings _settings = DisplaySettings.shared;
-
   WordLookup(this.registry);
 
-  Dictionary? get _mainDict => registry.byId(1); // 词根扩展以主词典为准
+  Dictionary? get _mainDict => registry.byId(1);
 
-  /// 首页搜索：词根扩展后，第一个“有可见内容”的候选即命中
+  /// 首页搜索：词根扩展后，第一个"有可见内容"的候选即命中
   Future<LookupResult> search(String word) async {
     if (_mainDict == null) {
       return const LookupResult(chips: [], displayText: '词典未就绪');
@@ -34,32 +32,52 @@ class WordLookup {
     final r = await _queryAll(word);
     return r ??
         LookupResult(
-          chips: const [],
+          chips: relatedWords(word),
           selected: word,
           displayText: '「$word」没有释义',
         );
   }
 
-  /// 聚合所有（设置允许的）词典；无任何可见内容返回 null
+  /// 词条详情：只用该词条来源词典查，忽略显示设置。
+  /// 与查词共用 section 构建与相关单词逻辑。
+  Future<LookupResult?> lookupEntry(String word, int? dictId) async {
+    final dict = registry.byId(dictId ?? 1) ?? registry.byId(1);
+    if (dict == null) return null;
+    final sections = await dict.query(word);
+    if (sections.isEmpty) return null;
+    sections.sort((a, b) => (a.sortHint ?? 0).compareTo(b.sortHint ?? 0));
+    return LookupResult(
+      chips: relatedWords(word),
+      selected: word,
+      displayText: _displayFromSections(sections) ?? '（无显示内容）',
+      tags: _tagsFromSections(sections),
+      sections: sections,
+    );
+  }
+
+  /// 词组（含空格）→ 相关单词 = 首词
+  static List<String> relatedWords(String word) {
+    final w = word.trim();
+    if (!w.contains(' ')) return const [];
+    final first = w.split(' ').first;
+    return first.isEmpty ? const [] : [first];
+  }
+
   Future<LookupResult?> _queryAll(String word) async {
     final visible = <ResultSection>[];
     for (final dict in registry.all) {
-      // 该词典声明的板块全部被关掉 → 连查都不查
       final caps = dict.getCapabilities();
       if (!caps.any((t) => _settings.isVisible(dict.id, t))) continue;
-
       final sections = await dict.query(word);
-      // 查到的板块再按设置逐个过滤（例如只关例句）
       final kept = sections
           .where((s) => _settings.isVisible(s.dictId, s.type))
           .toList();
       visible.addAll(kept);
     }
     if (visible.isEmpty) return null;
-
     visible.sort((a, b) => (a.sortHint ?? 0).compareTo(b.sortHint ?? 0));
     return LookupResult(
-      chips: const [],
+      chips: relatedWords(word), // ★ 词组命中时给相关单词 chip
       selected: word,
       displayText: _displayFromSections(visible) ?? '（无显示内容）',
       tags: _tagsFromSections(visible),

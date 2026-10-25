@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -7,11 +8,14 @@ import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 
 /// 全攻略词典（id=2）：Complete_Guide.db
-/// 表 items(id, word, level, type, eng, zh, optional, sort)
+/// 表 words(id, word) + items(id, headId, level, type, eng, zh, optional, sort)
 /// level: 0=head，1~5 下挂；type: head/phonetic/chunk/example/proverb/
 ///        form/synonym/nearsyn/antonym/note
-/// 本期不做板块细分：一个词条整体输出，按 level 缩进。
-/// ^…^ 加粗、*…* 下划线的渲染交给 UI 层（WordContentView 的富文本）。
+///
+/// 支持三类查询目标：
+/// 1. 单词（head）→ head 释义 + 全部下挂词块
+/// 2. 词组（head 就是词组，如 "look forward to"）→ 同上
+/// 3. 词块英文（items.eng 精确匹配）→ 该词块 + 其下级内容
 class CompleteGuideDict extends Dictionary {
   static const int dictId = 2;
   static const String assetPath = 'assets/Complete_Guide.db';
@@ -20,13 +24,16 @@ class CompleteGuideDict extends Dictionary {
 
   @override
   int get id => dictId;
-
   @override
   String get name => '全攻略';
 
+  /// 词块级导入：每个含 eng+zh 的词块各作为一条词条
+  @override
+  DictGranularity get granularity => DictGranularity.chunk;
+
   @override
   List<SectionType> getCapabilities() => const [
-        SectionType.translation, // 暂时都塞进 translation 一揽子显示
+        SectionType.translation,
       ];
 
   @override
@@ -56,8 +63,40 @@ class CompleteGuideDict extends Dictionary {
     }
   }
 
-  /// 把 items 表的行转成 ResultSection 列表
-  /// rows: items 表中 headId 匹配的全部行（按 id 排序，第一行是 head）
+  // ==================== 查询 ====================
+
+  @override
+  Future<List<ResultSection>> query(String word) async {
+    if (_db == null) return const [];
+    final w = word.trim();
+    if (w.isEmpty) return const [];
+    try {
+      // ① head（单词或词组 head）精确匹配
+      final head = await _db!.query('words',
+          where: 'word = ?', whereArgs: [w], limit: 1);
+      if (head.isNotEmpty) {
+        final rows = await _db!.query('items',
+            where: 'headId = ?', whereArgs: [head.first['id']],
+            orderBy: 'id');
+        return _buildSections(w, rows);
+      }
+      // ② 词块英文精确匹配（items.eng）→ 该词块 + 其下级
+      final item = await _db!.query('items',
+          where: 'eng = ?', whereArgs: [w], limit: 1);
+      if (item.isNotEmpty) {
+        final rows = await _db!.query('items',
+            where: 'headId = ?', whereArgs: [item.first['headId']],
+            orderBy: 'id');
+        final idx = rows.indexWhere((r) => r['id'] == item.first['id']);
+        if (idx >= 0) return _buildChunkSections(w, rows, idx);
+      }
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// head 词条整体（原逻辑保留：head 释义 + 各类型行）
   List<ResultSection> _buildSections(String word, List<Map<String, Object?>> rows) {
     final sections = <ResultSection>[];
 
@@ -77,9 +116,9 @@ class CompleteGuideDict extends Dictionary {
     }
     if (zhLines.isNotEmpty) {
       final lines = [
-          ?phonetic,
-          ...zhLines,
-        ];
+        ?phonetic,
+        ...zhLines,
+      ];
       sections.add(ResultSection(
         type: const SectionType('translation'),
         dictId: dictId,
@@ -87,51 +126,71 @@ class CompleteGuideDict extends Dictionary {
         sortHint: 0,
       ));
     }
-
-    // ---- 词块 / 例句 / 谚语 / 词形 / 同反义词 / 注释 → 每行一个 translation 板块 ----
-    const labeledTypes = {
-      'chunk': '词块', 'example': '例句', 'proverb': '谚语',
-      'form': '词形', 'synonym': '同义', 'nearsyn': '近义',
-      'antonym': '反义', 'note': '注',
-    };
-    for (final r in rows) {
-      final type = r['type'] as String;
-      final label = labeledTypes[type];
-      if (label == null) continue; // head/phonetic 已处理
-      final level = r['level'] as int;
-      final eng = ((r['eng'] as String?) ?? '').trim();
-      final zh = ((r['zh'] as String?) ?? '').trim();
-      final indent = '  ' * (level - 1).clamp(0, 4); // 二级行缩进归属上一行
-      final text = StringBuffer(indent);
-      if (eng.isNotEmpty) text.write(eng);
-      if (zh.isNotEmpty) text.write(eng.isNotEmpty ? '  $zh' : zh);
-      if (text.toString().trim().isEmpty) continue;
-      sections.add(ResultSection(
-        type: const SectionType('translation'),
-        dictId: dictId,
-        title: label, // 标题交给 UI 层显示，如「词块」「例句」
-        data: TranslationData([text.toString().trim()]),
-        sortHint: 10, // 全攻略排在默认词典释义之后
-      ));
-    }
+    // ---- 其余类型行 ----
+    _appendLabeledRows(sections, rows, fromIdx: 0, baseLevel: 0);
     return sections;
   }
 
-
-  @override
-  Future<List<ResultSection>> query(String word) async {
-    if (_db == null) return const [];
-    final head = await _db!.query('words',
-        where: 'word = ?', whereArgs: [word], limit: 1);
-    if (head.isEmpty) return const [];
-    final headId = head.first['id'] as int;
-    final rows = await _db!.query('items',
-        where: 'headId = ?', whereArgs: [headId], orderBy: 'id');
-    return _buildSections(word, rows); // ← 两个参数，word 在前
+  /// 词块词条：词块自身 + 其下级（level 更大的连续区段）
+  List<ResultSection> _buildChunkSections(
+      String word, List<Map<String, Object?>> rows, int idx) {
+    final sections = <ResultSection>[];
+    final target = rows[idx];
+    final lv = target['level'] as int;
+    // 词块自身
+    _appendOne(sections, target, 0);
+    // 下级：idx 之后 level > lv 的连续行
+    final sub = <Map<String, Object?>>[];
+    for (var i = idx + 1; i < rows.length; i++) {
+      if ((rows[i]['level'] as int) <= lv) break;
+      sub.add(rows[i]);
+    }
+    _appendLabeledRows(sections, sub, fromIdx: 0, baseLevel: lv);
+    return sections;
   }
 
+  void _appendLabeledRows(List<ResultSection> sections,
+      List<Map<String, Object?>> rows,
+      {required int fromIdx, required int baseLevel}) {
+    for (var i = fromIdx; i < rows.length; i++) {
+      _appendOne(sections, rows[i], (rows[i]['level'] as int) - baseLevel);
+    }
+  }
 
-  /// 批量导入词库用：按字母序取范围内的单词
+  void _appendOne(List<ResultSection> sections, Map<String, Object?> r,
+      int depthBelowBase) {
+    const labeledTypes = {
+      'chunk': '词块',
+      'example': '例句',
+      'proverb': '谚语',
+      'form': '词形',
+      'synonym': '同义',
+      'nearsyn': '近义',
+      'antonym': '反义',
+      'note': '注',
+    };
+    final type = r['type'] as String;
+    final label = labeledTypes[type];
+    if (label == null) return; // head/phonetic 已由上层处理
+    final eng = ((r['eng'] as String?) ?? '').trim();
+    final zh = ((r['zh'] as String?) ?? '').trim();
+    if (eng.isEmpty && zh.isEmpty) return;
+    final indent = ' ' * max(0, depthBelowBase - 1).clamp(0, 4);
+    final text = StringBuffer(indent);
+    if (eng.isNotEmpty) text.write(eng);
+    if (zh.isNotEmpty) text.write(eng.isNotEmpty ? ' $zh' : zh);
+    sections.add(ResultSection(
+      type: const SectionType('translation'),
+      dictId: dictId,
+      title: label,
+      data: TranslationData([text.toString().trim()]),
+      sortHint: 10,
+    ));
+  }
+
+  // ==================== 导入 ====================
+
+  /// word 粒度（本词典不用，但保留能力）
   @override
   Future<List<String>> queryRange(String from, String to) async {
     if (_db == null) return const [];
@@ -142,40 +201,113 @@ class CompleteGuideDict extends Dictionary {
     return rows.map((r) => r['word'] as String).toList();
   }
 
+  /// chunk 粒度：headword 范围内所有含 eng+zh 的词块
+  @override
+  Future<List<DictChunk>> queryChunkRange(String from, String to) async {
+    if (_db == null) return const [];
+    final rows = await _db!.rawQuery('''
+      SELECT w.word AS head, i.eng, i.zh, i.type
+      FROM items i JOIN words w ON w.id = i.headId
+      WHERE i.eng != '' AND i.zh != ''
+        AND lower(w.word) >= ? AND lower(w.word) <= ?
+      ORDER BY w.word, i.id
+    ''', [from.toLowerCase(), to.toLowerCase()]);
+    final seen = <String>{};
+    final out = <DictChunk>[];
+    for (final r in rows) {
+      final eng = (r['eng'] as String).trim();
+      if (eng.isEmpty || !seen.add(eng)) continue; // 去重（词块英文唯一）
+      out.add(DictChunk(
+        headWord: r['head'] as String,
+        eng: eng,
+        zh: (r['zh'] as String).trim(),
+        type: r['type'] as String,
+      ));
+    }
+    return out;
+  }
+
+  // ==================== 复习卡片 ====================
+
+  // ==================== 复习卡片 ====================
+
+  /// 重要度（impl 内声明，复习程序按此排序/取舍）：
+  /// 5 = head 主体释义；3 = 词块；2 = 例句；1 = 谚语
+  static const _impHead = 5;
+  static const _impChunk = 3;
+  static const _impExample = 2;
+  static const _impProverb = 1;
+
   @override
   Future<List<ReviewCard>> queryCards(String word) async {
     if (_db == null) return const [];
-    final head = await _db!.query('words', where: 'word = ?',
-        whereArgs: [word], limit: 1);
-    if (head.isEmpty) return const [];
-    final headId = head.first['id'] as int;
-    final rows = await _db!.query('items',
-        where: 'headId = ?', whereArgs: [headId], orderBy: 'id');
-
+    final w = word.trim();
     final cards = <ReviewCard>[];
-    // 主卡：正面 = 词块less的释义（zh），背面 = 单词
-    final meanings = <String>[];
+    try {
+      // ① head 匹配（单词或词组 head）
+      final head = await _db!.query('words',
+          where: 'word = ?', whereArgs: [w], limit: 1);
+      List<Map<String, Object?>> rows = const [];
+      if (head.isNotEmpty) {
+        rows = await _db!.query('items',
+            where: 'headId = ?', whereArgs: [head.first['id']],
+            orderBy: 'id');
+      } else {
+        // ② 词块匹配
+        final item = await _db!.query('items',
+            where: 'eng = ?', whereArgs: [w], limit: 1);
+        if (item.isEmpty) return const [];
+        rows = await _db!.query('items',
+            where: 'headId = ?', whereArgs: [item.first['headId']],
+            orderBy: 'id');
+        final idx = rows.indexWhere((r) => r['id'] == item.first['id']);
+        final it = rows[idx];
+        final eng = ((it['eng'] as String?) ?? '').trim();
+        final zh = ((it['zh'] as String?) ?? '').trim();
+        if (eng.isEmpty || zh.isEmpty) return const [];
+        cards.add(ReviewCard(eng: eng, zh: zh, importance: _impChunk));
+        // 词块的下级内容也做卡
+        final lv = it['level'] as int;
+        final sub = <Map<String, Object?>>[];
+        for (var i = idx + 1; i < rows.length; i++) {
+          if ((rows[i]['level'] as int) <= lv) break;
+          sub.add(rows[i]);
+        }
+        _cardsFromRows(cards, sub);
+        return cards;
+      }
+      // head 路径
+      final meanings = <String>[];
+      for (final r in rows) {
+        if ((r['level'] as int) != 0) continue;
+        final zh = (r['zh'] as String?)?.trim() ?? '';
+        if (zh.isNotEmpty) meanings.add(zh);
+      }
+      if (meanings.isNotEmpty) {
+        cards.add(ReviewCard(
+            eng: w, zh: meanings.join('\n'), importance: _impHead));
+      }
+      _cardsFromRows(cards, rows);
+    } catch (_) {}
+    return cards;
+  }
+
+  void _cardsFromRows(List<ReviewCard> cards, List<Map<String, Object?>> rows) {
+    const cardTypes = {
+      'chunk': _impChunk,
+      'example': _impExample,
+      'proverb': _impProverb,
+    };
     for (final r in rows) {
-      if ((r['level'] as int) != 0) continue;
-      final zh = (r['zh'] as String?)?.trim() ?? '';
-      if (zh.isNotEmpty) meanings.add(zh);
-    }
-    if (meanings.isNotEmpty) {
-      cards.add(ReviewCard(front: meanings.join('\n'), back: word, isMain: true));
-    }
-    // 词块卡：有英文有中文的行 → 中→英 与 英→中 两张
-    const cardTypes = {'chunk', 'example', 'proverb'};
-    for (final r in rows) {
-      final t = r['type'] as String;
-      if (!cardTypes.contains(t)) continue;
+      final imp = cardTypes[r['type'] as String];
+      if (imp == null) continue;
       final eng = ((r['eng'] as String?) ?? '').trim();
       final zh = ((r['zh'] as String?) ?? '').trim();
       if (eng.isEmpty || zh.isEmpty) continue;
-      cards.add(ReviewCard(front: zh, back: eng)); // 见中文想英文
-      cards.add(ReviewCard(front: eng, back: zh)); // 见英文想中文
+      cards.add(ReviewCard(eng: eng, zh: zh, importance: imp));
     }
-    return cards;
   }
+
 
   @override
   Future<void> dispose() async {

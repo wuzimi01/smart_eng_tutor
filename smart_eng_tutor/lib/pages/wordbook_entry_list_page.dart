@@ -168,21 +168,18 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
                         trailing: _selectMode
                             ? null
                             : const Icon(Icons.chevron_right),
-                        onTap: () {
-                          if (_selectMode) {
-                            _toggleSelect(e);
-                          } else {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => WordbookEntryDetailPage(
-                                  wordbookDb: widget._wordbookDb,
-                                  word: e.word,
-                                ),
-                              ),
-                            );
-                          }
-                        },
+                            onTap: () {
+                              if (_selectMode) {
+                                _toggleSelect(e);
+                              } else {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => WordbookEntryDetailPage(entry: e), // ★ 传整个 entry
+                                  ),
+                                );
+                              }
+                            },
                         // 长按进入选择模式并选中该项；已在选择模式中长按 = 切换选中
                         onLongPress: () {
                           if (!_selectMode) setState(() => _selectMode = true);

@@ -73,10 +73,17 @@ class LookupResult {
   });
 }
 
-/// 复习卡片：正反面都是多行文本
+/// 复习卡片：一对中英文，显示方向由复习页随机决定。
+/// importance: 重要度（0~5），由词典实现按内容类型给出，
+/// 复习程序按它排序/取舍，词典层不感知复习流程。
 class ReviewCard {
-  final String front; // 正面（蒙住的内容的对立面）
-  final String back;  // 背面
-  final bool isMain;  // 主卡（单词本身）还是词块卡
-  const ReviewCard({required this.front, required this.back, this.isMain = false});
+  final String eng;
+  final String zh;
+  final int importance;
+  const ReviewCard({
+    required this.eng,
+    required this.zh,
+    this.importance = 1,
+  });
 }
+

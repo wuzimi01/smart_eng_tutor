@@ -17,6 +17,9 @@ class BuiltinDict extends Dictionary {
   int get id => dictId;
   @override
   String get name => '内置词典';
+  /// 默认词典数据量太大，不开放批量导入
+  @override
+  bool get importable => false;
 
   @override
   List<SectionType> getCapabilities() => const [
@@ -113,6 +116,20 @@ class BuiltinDict extends Dictionary {
       return [];
     }
   }
+  @override
+  Future<List<ReviewCard>> queryCards(String word) async {
+    try {
+      final rows = await _dictDb?.query('stardict',
+          columns: ['translation'],
+          where: 'word = ?', whereArgs: [word], limit: 1);
+      final zh = (rows?.firstOrNull?['translation'] as String?)?.trim() ?? '';
+      if (zh.isEmpty) return const [];
+      return [ReviewCard(eng: word, zh: zh, importance: 5)];
+    } catch (_) {
+      return const [];
+    }
+  }
+
 
   @override
   Future<void> dispose() async {
