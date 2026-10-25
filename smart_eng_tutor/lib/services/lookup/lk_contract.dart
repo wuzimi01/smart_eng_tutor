@@ -33,7 +33,7 @@ abstract class Dictionary {
 
   /// 取某词/词块的复习卡片（主卡 + 词块卡）。无此能力的词典返回空列表。
   Future<List<ReviewCard>> queryCards(String word) async => [];
-
+  Future<List<String>> relatedHeads(String word) async => [];
   Future<void> dispose();
 }
 

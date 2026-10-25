@@ -129,6 +129,8 @@ class BuiltinDict extends Dictionary {
       return const [];
     }
   }
+  @override
+  Future<List<String>> relatedHeads(String word) async => const [];
 
 
   @override

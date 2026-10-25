@@ -7,20 +7,32 @@ import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_fsrs.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
 import 'dart:math' as math;
-/// wordbook.db —— 复习信息直接存在 wordbook_words 行内（FSRS-6），
-/// 不再有 review_schedule 表。
+
+/// wordbook.db —— 复习信息直接存在 wordbook_words 行内（FSRS-6）。
+///
+/// ★ 全局单例：唯一入口为 [WordbookDatabase.instance]，
+///   不提供公有构造，禁止 `WordbookDatabase()` 直接实例化。
 ///
 /// wordbook_words:
-///   id, bookId, dictId, word,
-///   progress (0=New 1=Learning 2=Review 3=Relearning),
-///   stability (S, 天), difficulty (D, 1~10),
-///   dueAt (毫秒), lastReviewedAt (毫秒)
+/// id, bookId, dictId, word,
+/// progress (0=New 1=Learning 2=Review 3=Relearning),
+/// stability (S, 天), difficulty (D, 1~10),
+/// dueAt (毫秒), lastReviewedAt (毫秒), contexts (JSON, 可空)
 class WordbookDatabase {
   Database? _bookDb;
+
+  // ===== 单例：唯一入口 =====
+  WordbookDatabase._internal();
+  static final WordbookDatabase instance = WordbookDatabase._internal();
+
   late final String _docPath;
   FsrsEngine? _fsrs;
 
-  Future<bool> init() async {
+  Future<bool>? _initting; // 防重入：并发 init 只执行一次
+
+  Future<bool> init() => _initting ??= _doInit();
+
+  Future<bool> _doInit() async {
     try {
       _docPath = (await getApplicationDocumentsDirectory()).path;
       _fsrs = await FsrsEngine.create();
@@ -61,6 +73,7 @@ class WordbookDatabase {
   /// 幂等迁移：老库（无 FSRS 列 / 有 review_schedule）→ 新结构
   Future<void> _ensureExtraSchema() async {
     final db = _bookDb!;
+
     // 新库完整建表（已存在则跳过）
     await db.execute('''
       CREATE TABLE IF NOT EXISTS wordbook_words(
@@ -73,9 +86,11 @@ class WordbookDatabase {
         difficulty REAL NOT NULL DEFAULT 0,
         dueAt INTEGER NOT NULL DEFAULT 0,
         lastReviewedAt INTEGER,
+        contexts TEXT,
         UNIQUE(bookId, word)
       )
     ''');
+
     // 老库补列
     const cols = {
       'progress': 'INTEGER NOT NULL DEFAULT 0',
@@ -83,6 +98,7 @@ class WordbookDatabase {
       'difficulty': 'REAL NOT NULL DEFAULT 0',
       'dueAt': 'INTEGER NOT NULL DEFAULT 0',
       'lastReviewedAt': 'INTEGER',
+      'contexts': 'TEXT',
     };
     for (final e in cols.entries) {
       try {
@@ -90,6 +106,7 @@ class WordbookDatabase {
             'ALTER TABLE wordbook_words ADD COLUMN ${e.key} ${e.value}');
       } catch (_) {}
     }
+
     // 旧调度表退役（数据已并入词条行）
     await db.execute('DROP TABLE IF EXISTS review_schedule');
     await db.execute(
@@ -104,13 +121,12 @@ class WordbookDatabase {
       SELECT w.id, w.name, COUNT(s.id) AS cnt
       FROM wordbooks w
       LEFT JOIN wordbook_words s ON s.bookId = w.id
-      GROUP BY w.id, w.name ORDER BY w.id
+      GROUP BY w.id, w.name
+      ORDER BY w.id
     ''');
     return rows
         .map((r) => Wordbook(
-            id: r['id'] as int,
-            name: r['name'] as String,
-            wordCount: r['cnt'] as int))
+            id: r['id'] as int, name: r['name'] as String, wordCount: r['cnt'] as int))
         .toList();
   }
 
@@ -118,7 +134,9 @@ class WordbookDatabase {
     if (_bookDb == null) return false;
     final bid = bookId ?? await _defaultBookId();
     final rows = await _bookDb!.query('wordbook_words',
-        where: 'bookId = ? AND word = ?', whereArgs: [bid, word], limit: 1);
+        where: 'bookId = ? AND word = ?',
+        whereArgs: [bid, word],
+        limit: 1);
     return rows.isNotEmpty;
   }
 
@@ -164,6 +182,7 @@ class WordbookDatabase {
         word: r['word'] as String,
         progress: (r['progress'] as int?) ?? 0,
         dueAt: (r['dueAt'] as int?) ?? 0,
+        contexts: r['contexts'] as String?,
       );
 
   // ==================== 词库管理 ====================
@@ -207,7 +226,10 @@ class WordbookDatabase {
               'bookId': targetBookId,
               'dictId': e.dictId,
               'word': e.word,
-              'progress': 0, 'stability': 0, 'difficulty': 0, 'dueAt': now,
+              'progress': 0,
+              'stability': 0,
+              'difficulty': 0,
+              'dueAt': now,
             },
             conflictAlgorithm: ConflictAlgorithm.ignore);
         if (id > 0) n++;
@@ -261,8 +283,11 @@ class WordbookDatabase {
               {
                 'bookId': bid,
                 'dictId': dict.id,
-                'word': c.eng, // 词块英文即词条 word；headWord 不落库，用时查
-                'progress': 0, 'stability': 0, 'difficulty': 0, 'dueAt': now,
+                'word': c.eng,
+                'progress': 0,
+                'stability': 0,
+                'difficulty': 0,
+                'dueAt': now,
               },
               conflictAlgorithm: ConflictAlgorithm.ignore);
           if (id > 0) n++;
@@ -276,7 +301,10 @@ class WordbookDatabase {
                 'bookId': bid,
                 'dictId': dict.id,
                 'word': w,
-                'progress': 0, 'stability': 0, 'difficulty': 0, 'dueAt': now,
+                'progress': 0,
+                'stability': 0,
+                'difficulty': 0,
+                'dueAt': now,
               },
               conflictAlgorithm: ConflictAlgorithm.ignore);
           if (id > 0) n++;
@@ -307,12 +335,14 @@ class WordbookDatabase {
         where: 'id = ?', whereArgs: [entryId], limit: 1);
     if (rows.isEmpty) return;
     final row = rows.first;
+
     final s = (row['stability'] as num?)?.toDouble() ?? 0;
     final d = (row['difficulty'] as num?)?.toDouble() ?? 0;
     final last = row['lastReviewedAt'] as int?;
     final isNew = s <= 0; // 从未复习过
-    final daysElapsed =
-        last == null ? 0.0 : (DateTime.now().millisecondsSinceEpoch - last) / 86400000.0;
+    final daysElapsed = last == null
+        ? 0.0
+        : (DateTime.now().millisecondsSinceEpoch - last) / 86400000.0;
 
     final out = await _fsrs!.review(
       isNew: isNew,
@@ -321,31 +351,49 @@ class WordbookDatabase {
       rating: rating,
       daysElapsed: daysElapsed,
     );
-
     final now = DateTime.now().millisecondsSinceEpoch;
+
     // progress 直接用 FSRS 状态：答对 → Review；答错 → Learning/Relearning
     final prevProgress = (row['progress'] as int?) ?? 0;
-    final progress =
-        rating == 0 ? (prevProgress == 2 ? 3 : 1) : 2;
+    final progress = rating == 0 ? (prevProgress == 2 ? 3 : 1) : 2;
+
     // 到期：Review → interval；Learning/Relearning → 10 分钟
     final dueAt = progress == 2
         ? now + (math.max(out.intervalDays, 10 / 1440) * 86400000).round()
         : now + 10 * 60 * 1000;
 
-
     await _bookDb!.update(
-        'wordbook_words',
-        {
-          'progress': progress,
-          'stability': out.stability,
-          'difficulty': out.difficulty,
-          'dueAt': dueAt,
-          'lastReviewedAt': now,
-        },
-        where: 'id = ?',
-        whereArgs: [entryId]);
+      'wordbook_words',
+      {
+        'progress': progress,
+        'stability': out.stability,
+        'difficulty': out.difficulty,
+        'dueAt': dueAt,
+        'lastReviewedAt': now,
+      },
+      where: 'id = ?',
+      whereArgs: [entryId],
+    );
   }
 
+  /// 按词库+词查词条（详情页显示复习情况）
+  Future<WordbookEntry?> findEntry(int bookId, String word) async {
+    if (_bookDb == null) return null;
+    final rows = await _bookDb!.query('wordbook_words',
+        where: 'bookId = ? AND word = ?',
+        whereArgs: [bookId, word],
+        limit: 1);
+    return rows.isEmpty ? null : _entryFromRow(rows.first);
+  }
+  /// 按主键查词条（详情页显示复习情况）
+  Future<WordbookEntry?> getEntry(int entryId) async {
+    if (_bookDb == null) return null;
+    final rows = await _bookDb!.query('wordbook_words',
+        where: 'id = ?', whereArgs: [entryId], limit: 1);
+    return rows.isEmpty ? null : _entryFromRow(rows.first);
+  }
+
+  /// 仅供 app 退出时调用；页面/服务不要调用（单例生命周期 = app 生命周期）
   void dispose() {
     _bookDb?.close();
   }

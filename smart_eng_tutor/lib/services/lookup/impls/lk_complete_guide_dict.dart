@@ -308,6 +308,39 @@ class CompleteGuideDict extends Dictionary {
     }
   }
 
+  @override
+  Future<List<String>> relatedHeads(String word) async {
+    if (_db == null) return const [];
+    final w = word.trim();
+    try {
+      // ① 找到该词对应的 headId（可能是 head 本身，也可能是词块）
+      Map<String, Object?>? item;
+      final byEng = await _db!.query('items',
+          columns: ['headId'], where: 'eng = ?', whereArgs: [w], limit: 1);
+      if (byEng.isNotEmpty) {
+        item = byEng.first;
+      } else {
+        final head = await _db!.query('words',
+            columns: ['id'], where: 'word = ?', whereArgs: [w], limit: 1);
+        if (head.isEmpty) return const [];
+        item = {'headId': head.first['id']};
+      }
+      final headId = item['headId'] as int;
+
+      // ② 同 head 下所有词块 + head 本身
+      final rows = await _db!.rawQuery('''
+        SELECT DISTINCT i.eng AS eng
+        FROM items i
+        WHERE i.headId = ? AND i.eng != ? AND TRIM(i.eng) != ''
+        UNION
+        SELECT hd.word AS eng FROM words hd WHERE hd.id = ? AND hd.word != ?
+      ''', [headId, w, headId, w]);
+      return [for (final r in rows) (r['eng'] as String).trim()]
+        ..removeWhere((e) => e.isEmpty);
+    } catch (_) {
+      return const [];
+    }
+  }
 
   @override
   Future<void> dispose() async {

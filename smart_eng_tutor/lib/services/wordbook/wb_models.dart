@@ -14,7 +14,8 @@ class WordbookEntry {
   final int? dictId;
   final String word;
   final int progress;
-  final int dueAt; // 毫秒时间戳
+  final int dueAt;
+  final String? contexts; // ★ 历史上下文 JSON，暂不解析，预留
   const WordbookEntry({
     required this.id,
     required this.bookId,
@@ -22,5 +23,7 @@ class WordbookEntry {
     required this.word,
     this.progress = 0,
     this.dueAt = 0,
+    this.contexts,
   });
 }
+

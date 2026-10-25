@@ -22,6 +22,9 @@ class DictionaryRegistry {
     }
     return null;
   }
+  /// 按词典 ID 取实现；dictId 为空/未注册（如 0=读文章收藏）时回退内置词典。
+  Dictionary implFor(int? dictId) =>
+      dictId == null ? _dicts.first : (byId(dictId) ?? _dicts.first);
 
   Future<void> initAll() async {
     for (final d in _dicts) {

@@ -1,5 +1,4 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:smart_eng_tutor/pages/widgets/chip_list.dart';
@@ -13,10 +12,9 @@ import 'package:smart_eng_tutor/services/wordbook/wb_service.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_lookup.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
-import 'package:smart_eng_tutor/pages/wordbook_list_page.dart';      // ← 补：错误 6
-import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';   // ← 补：错误 1
+import 'package:smart_eng_tutor/pages/wordbook_list_page.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
-
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -28,16 +26,17 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final bool _isMobile = Platform.isAndroid || Platform.isIOS;
   String _hint = '请输入内容...';
-  final WordbookDatabase __wordbookDb = WordbookDatabase();
+
+  // ★ 单例：全 app 唯一实例，生命周期 = app 生命周期
+  final WordbookDatabase _wordbookDb = WordbookDatabase.instance;
+
   final OcrRecognizer _ocrRecognizer = OcrRecognizer();
-  late final WordLookup _lookup = WordLookup(DictionaryRegistry.shared);   // 现在能解析了
-  late final OcrService _ocrService = OcrService(_ocrRecognizer);          // 字段名就是 _ocrService
-  late final WordbookService _wordbook = WordbookService(__wordbookDb);
-
-
+  late final WordLookup _lookup = WordLookup(DictionaryRegistry.shared);
+  late final OcrService _ocrService = OcrService(_ocrRecognizer);
+  late final WordbookService _wordbook = WordbookService(_wordbookDb);
   final TextEditingController _controller = TextEditingController();
 
-  LookupResult? _result;   // 查词结果整体保存
+  LookupResult? _result;
   bool _isLoading = true;
   List<String> _chips = [];
   String? _selectedWord;
@@ -51,29 +50,28 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    DisplaySettings.shared.addListener(_onSettingsChanged); // ← 新增
+    DisplaySettings.shared.addListener(_onSettingsChanged);
     _init();
   }
 
   void _onSettingsChanged() {
-    // 用当前输入框的词重新查询；若正在 OCR 识别则跳过，避免打断
     if (_isRecognizing) return;
     final w = _controller.text.trim();
     if (w.isNotEmpty) _search(w);
   }
 
   Future<void> _init() async {
-    final ok = await __wordbookDb.init();
+    // db 已在 main.dart 初始化；这里再调一次是幂等兜底
+    final ok = await _wordbookDb.init();
     setState(() {
       _isLoading = false;
       if (!ok) _showSnack('❌ 数据库初始化失败，请检查 assets');
     });
-    if (_isMobile) _ocrRecognizer.ensureInitialized();   // ← _ocrService → _ocrRecognizer
-
-    // ← ② 这里不再调 _registry.initAll()：main.dart 已做过，删掉原來那行
+    if (_isMobile) _ocrRecognizer.ensureInitialized();
   }
 
   // ==================== 提示条 ====================
+
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -88,6 +86,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ==================== OCR 流程 ====================
+
   Future<void> _showImageSourceDialog() async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -115,8 +114,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _pickAndRecognize(ImageSource source) async {
     setState(() => _isRecognizing = true);
     try {
-      final r = await _ocrService.run(context, source);    // ← _ocrFlow → _ocrService
-
+      final r = await _ocrService.run(context, source);
       if (!mounted) return;
       setState(() => _isRecognizing = false);
       if (r == null) return;
@@ -125,8 +123,8 @@ class _HomePageState extends State<HomePage> {
         _imageSize = r.imageSize;
         _ocrWords = r.words;
         _hint = r.words.isEmpty
-          ? '未识别到英文单词，请重试或检查图片清晰度'
-          : '点击图片上的单词进行查询（共 ${r.words.length} 个）';
+            ? '未识别到英文单词，请重试或检查图片清晰度'
+            : '点击图片上的单词进行查询（共 ${r.words.length} 个）';
       });
     } catch (e) {
       if (!mounted) return;
@@ -136,6 +134,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ==================== 搜索逻辑 ====================
+
   Future<void> _search(String word) async {
     if (word.isEmpty) {
       setState(() {
@@ -151,12 +150,11 @@ class _HomePageState extends State<HomePage> {
     try {
       final r = await _lookup.search(word);
       if (!mounted) return;
-      final fav = r.selected != null
-          ? await _wordbook.isFavorited(r.selected!)
-          : false;
+      final fav =
+          r.selected != null ? await _wordbook.isFavorited(r.selected!) : false;
       if (!mounted) return;
       setState(() {
-        _result = r;                 // ← 整个 LookupResult 保存
+        _result = r;
         _chips = r.chips;
         _selectedWord = r.selected;
         _isFavorited = fav;
@@ -228,14 +226,15 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
-    DisplaySettings.shared.removeListener(_onSettingsChanged); // ← 新增
+    DisplaySettings.shared.removeListener(_onSettingsChanged);
     _controller.dispose();
-    __wordbookDb.dispose();
+    // ★ 不 dispose _wordbookDb：单例生命周期 = app 生命周期
     _ocrRecognizer.dispose();
     super.dispose();
   }
 
   // ==================== UI ====================
+
   @override
   Widget build(BuildContext context) {
     final body = SafeArea(
@@ -284,21 +283,22 @@ class _HomePageState extends State<HomePage> {
                               padding: EdgeInsets.all(16),
                               child: CircularProgressIndicator(),
                             ),
-                          // 词条结果区：信息栏 + 释义（整体进 WordInfoBar）
                           if (_selectedWord != null && !_isRecognizing) ...[
-                            // 星标行（收藏按钮保留原职责，不并入内容视图）
                             Align(
                               alignment: Alignment.centerRight,
                               child: IconButton(
                                 icon: Icon(
-                                  _isFavorited ? Icons.star : Icons.star_border,
-                                  color: _isFavorited ? Colors.amber : Colors.grey,
+                                  _isFavorited
+                                      ? Icons.star
+                                      : Icons.star_border,
+                                  color: _isFavorited
+                                      ? Colors.amber
+                                      : Colors.grey,
                                 ),
                                 tooltip: '收藏',
                                 onPressed: _toggleFavorite,
                               ),
                             ),
-                            // 统一内容视图：词头 + chips(复用 ChipList 亦可) + 徽章 + 释义
                             WordContentView(
                               word: _selectedWord!,
                               sections: _result?.sections ?? const [],
@@ -308,7 +308,8 @@ class _HomePageState extends State<HomePage> {
                             Text(
                               _hint,
                               textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 24, color: Colors.grey),
+                              style: const TextStyle(
+                                  fontSize: 24, color: Colors.grey),
                             ),
                         ],
                       ),
@@ -326,8 +327,10 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: '设置',
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const SettingsPage())),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsPage()),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.menu_book),
@@ -336,7 +339,7 @@ class _HomePageState extends State<HomePage> {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => WordbookListPage(wordbookDb: __wordbookDb),
+                  builder: (_) => WordbookListPage(wordbookDb: _wordbookDb),
                 ),
               );
               // 返回后按当前选中词刷新星星
