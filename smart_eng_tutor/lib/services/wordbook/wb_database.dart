@@ -7,6 +7,23 @@ import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_fsrs.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
 import 'dart:math' as math;
+/// 词条复习状态的数据库快照（撤回打分用）
+class ReviewSnapshot {
+  final int entryId;
+  final int progress;
+  final double stability;
+  final double difficulty;
+  final int dueAt;
+  final int? lastReviewedAt;
+  const ReviewSnapshot({
+    required this.entryId,
+    required this.progress,
+    required this.stability,
+    required this.difficulty,
+    required this.dueAt,
+    this.lastReviewedAt,
+  });
+}
 
 /// wordbook.db —— 复习信息直接存在 wordbook_words 行内（FSRS-6）。
 ///
@@ -370,6 +387,63 @@ class WordbookDatabase {
         'difficulty': out.difficulty,
         'dueAt': dueAt,
         'lastReviewedAt': now,
+      },
+      where: 'id = ?',
+      whereArgs: [entryId],
+    );
+  }
+    /// ★ 复习状态快照（撤回打分用）
+  Future<ReviewSnapshot?> getReviewSnapshot(int entryId) async {
+    if (_bookDb == null) return null;
+    final rows = await _bookDb!.query('wordbook_words',
+        where: 'id = ?', whereArgs: [entryId], limit: 1);
+    if (rows.isEmpty) return null;
+    final r = rows.first;
+    return ReviewSnapshot(
+      entryId: entryId,
+      progress: (r['progress'] as int?) ?? 0,
+      stability: (r['stability'] as num?)?.toDouble() ?? 0,
+      difficulty: (r['difficulty'] as num?)?.toDouble() ?? 0,
+      dueAt: (r['dueAt'] as int?) ?? 0,
+      lastReviewedAt: r['lastReviewedAt'] as int?,
+    );
+  }
+
+  /// ★ 恢复复习状态（撤销打分）
+  Future<void> restoreReviewSnapshot(ReviewSnapshot snap) async {
+    if (_bookDb == null) return;
+    await _bookDb!.update(
+      'wordbook_words',
+      {
+        'progress': snap.progress,
+        'stability': snap.stability,
+        'difficulty': snap.difficulty,
+        'dueAt': snap.dueAt,
+        'lastReviewedAt': snap.lastReviewedAt,
+      },
+      where: 'id = ?',
+      whereArgs: [snap.entryId],
+    );
+  }
+
+  /// ★ 撤销打分：把词条的复习状态恢复到打分前的快照
+  Future<void> restoreReviewState({
+    required int entryId,
+    required int progress,
+    required double stability,
+    required double difficulty,
+    required int dueAt,
+    int? lastReviewedAt,
+  }) async {
+    if (_bookDb == null) return;
+    await _bookDb!.update(
+      'wordbook_words',
+      {
+        'progress': progress,
+        'stability': stability,
+        'difficulty': difficulty,
+        'dueAt': dueAt,
+        'lastReviewedAt': lastReviewedAt,
       },
       where: 'id = ?',
       whereArgs: [entryId],
