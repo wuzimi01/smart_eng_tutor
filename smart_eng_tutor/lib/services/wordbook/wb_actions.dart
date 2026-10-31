@@ -1,17 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
-import 'package:smart_eng_tutor/pages/review_page.dart';
+import 'package:smart_eng_tutor/pages/flashcard_review_page.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_review_service.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
-
+import 'package:smart_eng_tutor/pages/widgets/review_mode_dialog.dart';
+import 'package:smart_eng_tutor/pages/match_review_page.dart';
 /// 词库通用操作：复习 / 从词典导入。
 /// wordbook_list_page 与 wordbook_entry_list_page 共用。
 
-/// 复习某个词库。返回 true = 实际开了会话；false = 无到期内容。
+/// 复习某个词库：先选模式（闪卡/连线）。
+/// 返回 true = 实际开始了复习；false = 取消或无到期内容。
 Future<bool> startBookReview(
     BuildContext context, WordbookDatabase db, int bookId, String bookName,
     {void Function()? onFinish}) async {
+  final mode = await showReviewModeDialog(context);
+  if (mode == null || !context.mounted) return false;
+
+  if (mode == ReviewMode.matching) {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MatchReviewPage(db: db, bookId: bookId, bookName: bookName),
+      ),
+    );
+    onFinish?.call();
+    return true;
+  }
+
+  // ---------- 闪卡（原逻辑）----------
   final service = ReviewService(db, bookId: bookId);
   final session = await service.startSession();
   if (!context.mounted) return false;
