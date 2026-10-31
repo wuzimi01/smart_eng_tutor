@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-
 import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
-import 'package:smart_eng_tutor/pages/wordbook_entry_list_page.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_actions.dart';
+import 'package:smart_eng_tutor/pages/wordbook_entry_list_page.dart';
 
-/// 词库列表页（新增/删除词库，点击词库 → 词条列表）
+/// 词库列表页（新增/删除词库，点击词库 → 词条列表；
+/// 每个词库左侧提供复习按钮）
 class WordbookListPage extends StatefulWidget {
   final WordbookDatabase _wordbookDb;
   const WordbookListPage({super.key, required this._wordbookDb});
@@ -44,7 +45,6 @@ class _WordbookListPageState extends State<WordbookListPage> {
   }
 
   // ---------- 新增词库 ----------
-
   Future<void> _createBook() async {
     final name = await showDialog<String>(
       context: context,
@@ -63,8 +63,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.pop(c, ctrl.text),
-                child: const Text('创建')),
+            FilledButton(onPressed: () => Navigator.pop(c, ctrl.text), child: const Text('创建')),
           ],
         );
       },
@@ -81,7 +80,6 @@ class _WordbookListPageState extends State<WordbookListPage> {
   }
 
   // ---------- 删除词库 ----------
-
   Future<void> _deleteBook(Wordbook b) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -104,6 +102,40 @@ class _WordbookListPageState extends State<WordbookListPage> {
     _showSnack(done ? '已删除词库「${b.name}」' : '默认词库不可删除');
     _load();
   }
+
+  // ---------- 长按菜单 ----------
+  void _showBookMenu(Wordbook b) {
+    showModalBottomSheet(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.download),
+              title: Text('从词典导入到「${b.name}」'),
+              onTap: () {
+                Navigator.pop(c);
+                importFromDictWithFeedback(
+                    context, widget._wordbookDb, b.id, b.name,
+                    onDone: _load);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.school),
+              title: Text('复习「${b.name}」'),
+              onTap: () {
+                Navigator.pop(c);
+                startBookReview(
+                    context, widget._wordbookDb, b.id, b.name, onFinish: _load);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +173,16 @@ class _WordbookListPageState extends State<WordbookListPage> {
                         return false; // 删除由对话框内决定，滑动本身不删除
                       },
                       child: ListTile(
-                        leading: const Icon(Icons.menu_book),
+                        // ★ 左侧：复习按钮（替代原 menu_book 图标）
+                        leading: IconButton(
+                          icon: const Icon(Icons.school),
+                          color: Theme.of(context).colorScheme.primary,
+                          tooltip: '复习「${b.name}」',
+                          onPressed: b.wordCount > 0
+                              ? () => startBookReview(
+                                  context, widget._wordbookDb, b.id, b.name, onFinish: _load)
+                              : null,
+                        ),
                         title: Text(b.name),
                         subtitle: Text('${b.wordCount} 个单词'),
                         trailing: const Icon(Icons.chevron_right),
@@ -158,6 +199,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
                           );
                           _load();
                         },
+                        onLongPress: () => _showBookMenu(b),
                       ),
                     );
                   },

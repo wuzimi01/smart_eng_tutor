@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
 import 'package:smart_eng_tutor/pages/wordbook_entry_detail_page.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
-
+import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
+import 'package:smart_eng_tutor/pages/widgets/inline_text.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_actions.dart';
 /// 词条列表页（点击词条 → 释义详情；长按进入批量选择模式）
 class WordbookEntryListPage extends StatefulWidget {
   final WordbookDatabase _wordbookDb;
@@ -25,6 +27,9 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
   bool _selectMode = false;
   final Set<int> _selectedIds = {}; // 存 entry.id
 
+  /// entry.id → 释义摘要（来源词典第一张卡片的 zh，含 ^/$ 标记，富文本渲染）
+  final Map<int, String> _translations = {};
+
   List<WordbookEntry> get _selectedEntries =>
       _entries.where((e) => _selectedIds.contains(e.id)).toList();
 
@@ -41,14 +46,28 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
       _entries = entries;
       _loading = false;
       // 重载后清掉已不存在的选择
-      _selectedIds.removeWhere(
-          (id) => !entries.any((e) => e.id == id));
+      _selectedIds.removeWhere((id) => !entries.any((e) => e.id == id));
       if (_selectMode && _selectedIds.isEmpty) _selectMode = false;
     });
+    _loadTranslations(entries);
   }
 
-  void _exitSelectMode() =>
-      setState(() { _selectMode = false; _selectedIds.clear(); });
+  /// 异步补释义，不阻塞列表首帧
+  Future<void> _loadTranslations(List<WordbookEntry> entries) async {
+    for (final e in entries) {
+      if (_translations.containsKey(e.id)) continue;
+      final dict = DictionaryRegistry.shared.implFor(e.dictId);
+      final cards = await dict.queryCards(e.word);
+      final zh = cards.isEmpty ? '' : cards.first.zh.trim();
+      if (!mounted) return;
+      setState(() => _translations[e.id] = zh);
+    }
+  }
+
+  void _exitSelectMode() => setState(() {
+        _selectMode = false;
+        _selectedIds.clear();
+      });
 
   void _toggleSelect(WordbookEntry e) {
     setState(() {
@@ -58,7 +77,6 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
   }
 
   // ---------- 批量操作 ----------
-
   Future<void> _batchDelete() async {
     final sel = _selectedEntries;
     final ok = await showDialog<bool>(
@@ -131,7 +149,6 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
   }
 
   // ---------- UI ----------
-
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -152,6 +169,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
                     itemBuilder: (context, i) {
                       final e = _entries[i];
                       final isSelected = _selectedIds.contains(e.id);
+                      final zh = _translations[e.id];
                       return ListTile(
                         leading: _selectMode
                             ? Icon(
@@ -161,10 +179,31 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
                                 color: isSelected ? Colors.blue : null,
                               )
                             : const Icon(Icons.star_outline),
-                        title: Text(e.word,
-                            style: const TextStyle(fontSize: 18)),
-                        // translation 已从数据模型移除，摘要行删掉；
-                        // 如想在列表区分来源词典，后续可用 dictId 查词典名
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(e.word,
+                                  style: const TextStyle(fontSize: 18)),
+                            ),
+                            // ★ 右对齐释义（富文本，渲染 ^加粗^ / $下划线$）
+                            if (!_selectMode &&
+                                zh != null &&
+                                zh.isNotEmpty) ...[
+                              const SizedBox(width: 12),
+                              Flexible(
+                                flex: 2,
+                                child: InlineText(
+                                  zh,
+                                  textAlign: TextAlign.right,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 14, color: Colors.grey),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                         trailing: _selectMode
                             ? null
                             : const Icon(Icons.chevron_right),
@@ -175,10 +214,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => WordbookEntryDetailPage(
-                                  wordbookDb: widget._wordbookDb,
-                                  word: e.word,
-                                ),
+                                builder: (_) => WordbookEntryDetailPage(entry: e),
                               ),
                             );
                           }
@@ -200,15 +236,30 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
       title: Text(widget.bookName),
       actions: [
         IconButton(
-          icon: const Icon(Icons.checklist),
-          tooltip: '批量操作',
+          icon: const Icon(Icons.school),
+          tooltip: '复习',
           onPressed: _entries.isEmpty
               ? null
-              : () => setState(() => _selectMode = true),
+              : () => startBookReview(
+                  context, widget._wordbookDb, widget.bookId, widget.bookName,
+                  onFinish: _load),
+        ),
+        IconButton(
+          icon: const Icon(Icons.file_upload_outlined),
+          tooltip: '导入',
+          onPressed: () => importFromDictWithFeedback(
+              context, widget._wordbookDb, widget.bookId, widget.bookName,
+              onDone: _load),
+        ),
+        IconButton(
+          icon: const Icon(Icons.checklist),
+          tooltip: '批量操作',
+          onPressed: _entries.isEmpty ? null : () => setState(() => _selectMode = true),
         ),
       ],
     );
   }
+
 
   PreferredSizeWidget _buildSelectAppBar() {
     return AppBar(
@@ -239,18 +290,30 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
           enabled: _selectedIds.isNotEmpty,
           onSelected: (v) {
             switch (v) {
-              case 'delete': _batchDelete();
-              case 'copy':   _batchCopy();
-              case 'move':   _batchMove();
+              case 'delete':
+                _batchDelete();
+              case 'copy':
+                _batchCopy();
+              case 'move':
+                _batchMove();
             }
           },
           itemBuilder: (_) => const [
-            PopupMenuItem(value: 'delete', child: ListTile(
-                leading: Icon(Icons.delete_outline), title: Text('批量删除'))),
-            PopupMenuItem(value: 'copy', child: ListTile(
-                leading: Icon(Icons.copy_all), title: Text('复制到其他词库'))),
-            PopupMenuItem(value: 'move', child: ListTile(
-                leading: Icon(Icons.drive_file_move), title: Text('剪切到其他词库'))),
+            PopupMenuItem(
+                value: 'delete',
+                child: ListTile(
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('批量删除'))),
+            PopupMenuItem(
+                value: 'copy',
+                child: ListTile(
+                    leading: Icon(Icons.copy_all),
+                    title: Text('复制到其他词库'))),
+            PopupMenuItem(
+                value: 'move',
+                child: ListTile(
+                    leading: Icon(Icons.drive_file_move),
+                    title: Text('剪切到其他词库'))),
           ],
         ),
       ],

@@ -2,20 +2,20 @@ import 'package:flutter/material.dart';
 
 import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
+import 'package:smart_eng_tutor/pages/widgets/inline_text.dart';
 
 
 /// 通用词典结果渲染：按设置过滤，按类型排版；未知类型忽略。
 class SectionsView extends StatelessWidget {
-  final int dictId;
   final List<ResultSection> sections;
 
-  const SectionsView({super.key, required this.dictId, required this.sections});
+  const SectionsView({super.key, required this.sections});
 
   @override
   Widget build(BuildContext context) {
-    final s = DisplaySettings.shared;
-    final visible =
-        sections.where((sec) => s.isVisible(dictId, sec.type)).toList();
+    final visible = sections
+    .where((sec) => DisplaySettings.shared.isVisible(sec.dictId, sec.type))
+    .toList();
 
     if (visible.isEmpty) {
       return const Text('（无显示内容）',
@@ -136,16 +136,21 @@ class _TranslationView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const base = TextStyle(fontSize: 18, height: 1.6);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final line in data.lines)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text(line,
-                style: const TextStyle(fontSize: 18, height: 1.6)),
+            child: Text.rich(
+              TextSpan(children: parseInline(line, base: base)),
+              style: base,
+            ),
           ),
       ],
     );
   }
 }
+
+

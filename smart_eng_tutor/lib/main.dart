@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart'
 import 'package:smart_eng_tutor/pages/home_page.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,8 +16,10 @@ void main() async {
     databaseFactory = databaseFactoryFfi;
   }
 
-  await DisplaySettings.shared.init();      // ← 新增
+  await DisplaySettings.shared.init();
   await DictionaryRegistry.shared.initAll();
+  await WordbookDatabase.instance.init(); // ★ 启动时初始化一次
+
   runApp(const MainApp());
 }
 
