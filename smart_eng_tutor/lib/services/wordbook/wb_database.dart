@@ -7,6 +7,7 @@ import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_fsrs.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
 import 'dart:math' as math;
+import 'package:smart_eng_tutor/services/lookup/lk_text_utils.dart';
 /// 词条复习状态的数据库快照（撤回打分用）
 class ReviewSnapshot {
   final int entryId;
@@ -165,7 +166,7 @@ class WordbookDatabase {
       final id = await _bookDb!.insert('wordbook_words', {
         'bookId': bid,
         'dictId': dictId,
-        'word': word,
+        'word': LkTextUtils.strip(word),
         'progress': 0,
         'stability': 0,
         'difficulty': 0,
@@ -231,54 +232,41 @@ class WordbookDatabase {
   Future<List<Wordbook>> queryOtherBooks(int excludeBookId) async =>
       (await queryWordbooks()).where((b) => b.id != excludeBookId).toList();
 
-  Future<int> copyWords(List<WordbookEntry> entries, int targetBookId) async {
-    if (_bookDb == null || entries.isEmpty) return 0;
+  /// 复制/移动的公共实现：整行覆盖（含复习记录 FSRS 状态）。
+  /// UNIQUE(bookId, word) 冲突时 replace 覆盖目标词条。
+  Future<int> _copyRows(List<int> ids, int targetBookId,
+      {bool deleteSource = false}) async {
+    if (_bookDb == null || ids.isEmpty) return 0;
+    final ph = List.filled(ids.length, '?').join(',');
+    final rows = await _bookDb!
+        .query('wordbook_words', where: 'id IN ($ph)', whereArgs: ids);
     int n = 0;
-    final now = DateTime.now().millisecondsSinceEpoch;
     await _bookDb!.transaction((txn) async {
-      for (final e in entries) {
-        final id = await txn.insert(
-            'wordbook_words',
-            {
-              'bookId': targetBookId,
-              'dictId': e.dictId,
-              'word': e.word,
-              'progress': 0,
-              'stability': 0,
-              'difficulty': 0,
-              'dueAt': now,
-            },
-            conflictAlgorithm: ConflictAlgorithm.ignore);
+      for (final r in rows) {
+        final row = Map<String, Object?>.from(r)
+          ..['bookId'] = targetBookId
+          ..remove('id'); // 让目标库重新分配主键
+        final id = await txn.insert('wordbook_words', row,
+            conflictAlgorithm: ConflictAlgorithm.replace);
         if (id > 0) n++;
+      }
+      if (deleteSource) {
+        await txn
+            .delete('wordbook_words', where: 'id IN ($ph)', whereArgs: ids);
       }
     });
     return n;
   }
 
-  Future<int> moveWords(List<WordbookEntry> entries, int targetBookId) async {
-    if (_bookDb == null || entries.isEmpty) return 0;
-    int n = 0;
-    await _bookDb!.transaction((txn) async {
-      for (final e in entries) {
-        final id = await txn.insert(
-            'wordbook_words',
-            {
-              'bookId': targetBookId,
-              'dictId': e.dictId,
-              'word': e.word,
-              'progress': e.progress,
-              'dueAt': e.dueAt,
-            },
-            conflictAlgorithm: ConflictAlgorithm.ignore);
-        if (id > 0) {
-          await txn
-              .delete('wordbook_words', where: 'id = ?', whereArgs: [e.id]);
-          n++;
-        }
-      }
-    });
-    return n;
-  }
+  /// 复制到目标词库：目标已有同词 → 连同复习记录一起覆盖
+  Future<int> copyWords(List<WordbookEntry> entries, int targetBookId) =>
+      _copyRows(entries.map((e) => e.id).toList(), targetBookId);
+
+  /// 剪切到目标词库：覆盖后删除源词条
+  Future<int> moveWords(List<WordbookEntry> entries, int targetBookId) =>
+      _copyRows(entries.map((e) => e.id).toList(), targetBookId,
+          deleteSource: true);
+
 
   // ==================== 批量导入 ====================
 
@@ -300,7 +288,7 @@ class WordbookDatabase {
               {
                 'bookId': bid,
                 'dictId': dict.id,
-                'word': c.eng,
+                'word': LkTextUtils.strip(c.eng),
                 'progress': 0,
                 'stability': 0,
                 'difficulty': 0,
@@ -317,7 +305,7 @@ class WordbookDatabase {
               {
                 'bookId': bid,
                 'dictId': dict.id,
-                'word': w,
+                'word': LkTextUtils.strip(w),
                 'progress': 0,
                 'stability': 0,
                 'difficulty': 0,

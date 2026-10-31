@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' show join;
 import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
+import 'package:smart_eng_tutor/services/lookup/lk_text_utils.dart';
 
 /// 全攻略词典（id=2）：Complete_Guide.db
 /// 表 words(id, word) + items(id, headId, level, type, eng, zh, optional, sort)
@@ -71,18 +72,20 @@ class CompleteGuideDict extends Dictionary {
     final w = word.trim();
     if (w.isEmpty) return const [];
     try {
-      // ① head（单词或词组 head）精确匹配
+      // ① head 精确匹配（word 字段也剥标记比较，双保险）
       final head = await _db!.query('words',
-          where: 'word = ?', whereArgs: [w], limit: 1);
+          where: "REPLACE(REPLACE(word,'^',''),'*','') = ?",
+          whereArgs: [w], limit: 1);
       if (head.isNotEmpty) {
         final rows = await _db!.query('items',
             where: 'headId = ?', whereArgs: [head.first['id']],
             orderBy: 'id');
         return _buildSections(w, rows);
       }
-      // ② 词块英文精确匹配（items.eng）→ 该词块 + 其下级
+      // ② 词块英文精确匹配
       final item = await _db!.query('items',
-          where: 'eng = ?', whereArgs: [w], limit: 1);
+          where: "REPLACE(REPLACE(eng,'^',''),'*','') = ?",
+          whereArgs: [w], limit: 1);
       if (item.isNotEmpty) {
         final rows = await _db!.query('items',
             where: 'headId = ?', whereArgs: [item.first['headId']],
@@ -217,12 +220,13 @@ class CompleteGuideDict extends Dictionary {
     for (final r in rows) {
       final eng = (r['eng'] as String).trim();
       if (eng.isEmpty || !seen.add(eng)) continue; // 去重（词块英文唯一）
-      out.add(DictChunk(
-        headWord: r['head'] as String,
-        eng: eng,
-        zh: (r['zh'] as String).trim(),
-        type: r['type'] as String,
-      ));
+        out.add(DictChunk(
+          headWord: LkTextUtils.strip(r['head'] as String),
+          eng: LkTextUtils.strip(eng),
+          zh: (r['zh'] as String).trim(), // zh 保留标记，显示层渲染
+          type: r['type'] as String,
+        ));
+
     }
     return out;
   }
@@ -244,18 +248,20 @@ class CompleteGuideDict extends Dictionary {
     final w = word.trim();
     final cards = <ReviewCard>[];
     try {
-      // ① head 匹配（单词或词组 head）
+      // ① head 精确匹配（word 字段也剥标记比较，双保险）
       final head = await _db!.query('words',
-          where: 'word = ?', whereArgs: [w], limit: 1);
+          where: "REPLACE(REPLACE(word,'^',''),'*','') = ?",
+          whereArgs: [w], limit: 1);
       List<Map<String, Object?>> rows = const [];
       if (head.isNotEmpty) {
         rows = await _db!.query('items',
             where: 'headId = ?', whereArgs: [head.first['id']],
             orderBy: 'id');
       } else {
-        // ② 词块匹配
+        // ② 词块英文精确匹配
         final item = await _db!.query('items',
-            where: 'eng = ?', whereArgs: [w], limit: 1);
+            where: "REPLACE(REPLACE(eng,'^',''),'*','') = ?",
+            whereArgs: [w], limit: 1);
         if (item.isEmpty) return const [];
         rows = await _db!.query('items',
             where: 'headId = ?', whereArgs: [item.first['headId']],
@@ -313,34 +319,21 @@ class CompleteGuideDict extends Dictionary {
     if (_db == null) return const [];
     final w = word.trim();
     try {
-      // ① 找到该词对应的 headId（可能是 head 本身，也可能是词块）
-      Map<String, Object?>? item;
-      final byEng = await _db!.query('items',
-          columns: ['headId'], where: 'eng = ?', whereArgs: [w], limit: 1);
-      if (byEng.isNotEmpty) {
-        item = byEng.first;
-      } else {
-        final head = await _db!.query('words',
-            columns: ['id'], where: 'word = ?', whereArgs: [w], limit: 1);
-        if (head.isEmpty) return const [];
-        item = {'headId': head.first['id']};
-      }
-      final headId = item['headId'] as int;
+      // 词块 → 它所属的 head；head 本身 → 返回空（没有上级）
+      final byEng = await _db!.query('items', columns: ['headId'],
+          where: "REPLACE(REPLACE(eng,'^',''),'*','') = ?",
+          whereArgs: [w], limit: 1);
+      if (byEng.isEmpty) return const []; // word 本身就是 head，无上级
 
-      // ② 同 head 下所有词块 + head 本身
-      final rows = await _db!.rawQuery('''
-        SELECT DISTINCT i.eng AS eng
-        FROM items i
-        WHERE i.headId = ? AND i.eng != ? AND TRIM(i.eng) != ''
-        UNION
-        SELECT hd.word AS eng FROM words hd WHERE hd.id = ? AND hd.word != ?
-      ''', [headId, w, headId, w]);
-      return [for (final r in rows) (r['eng'] as String).trim()]
-        ..removeWhere((e) => e.isEmpty);
+      final rows = await _db!.query('words', columns: ['word'],
+          where: 'id = ?', whereArgs: [byEng.first['headId']], limit: 1);
+      final head = (rows.firstOrNull?['word'] as String?)?.trim() ?? '';
+      return head.isEmpty || head == w ? const [] : [head];
     } catch (_) {
       return const [];
     }
   }
+
 
   @override
   Future<void> dispose() async {

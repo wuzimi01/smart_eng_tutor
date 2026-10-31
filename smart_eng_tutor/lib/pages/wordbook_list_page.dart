@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_models.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
-import 'package:smart_eng_tutor/pages/review_page.dart';
-import 'package:smart_eng_tutor/services/wordbook/wb_review_service.dart';
-import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
-import 'package:smart_eng_tutor/services/lookup/lk_contract.dart';
+import 'package:smart_eng_tutor/services/wordbook/wb_actions.dart';
 import 'package:smart_eng_tutor/pages/wordbook_entry_list_page.dart';
 
-
-/// 词库列表页（新增/删除词库，点击词库 → 词条列表）
+/// 词库列表页（新增/删除词库，点击词库 → 词条列表；
+/// 每个词库左侧提供复习按钮）
 class WordbookListPage extends StatefulWidget {
   final WordbookDatabase _wordbookDb;
   const WordbookListPage({super.key, required this._wordbookDb});
+
   @override
   State<WordbookListPage> createState() => _WordbookListPageState();
 }
@@ -105,98 +103,26 @@ class _WordbookListPageState extends State<WordbookListPage> {
     _load();
   }
 
-  // ---------- 复习（针对某个词库） ----------
+  // ---------- 复习（针对某个词库）----------
   Future<void> _startReview(Wordbook b) async {
-    final service = ReviewService(widget._wordbookDb, bookId: b.id);
-    final session = await service.startSession();
-    if (!mounted) return;
-    if (session == null) {
-      _showSnack('「${b.name}」当前没有到期的复习内容 🎉');
-      return;
-    }
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ReviewPage(service: service)),
-    );
-    _showSnack('复习完成，成绩已记录');
-    _load();
+    await startBookReview(context, widget._wordbookDb, b.id, b.name,
+        onFinish: () {
+      _showSnack('复习完成，成绩已记录');
+      _load();
+    });
   }
 
   // ---------- 从词典批量导入 ----------
-  Future<void> _importFromDict(int bookId, String bookName) async {
-    // ★ 只列声明了 importable 的词典（默认词典自动排除）
-    final dicts =
-        DictionaryRegistry.shared.all.where((d) => d.importable).toList();
-    if (dicts.isEmpty) {
-      _showSnack('没有可导入的词典');
-      return;
-    }
-    final dict = await showDialog<Dictionary>(
-      context: context,
-      builder: (c) => SimpleDialog(
-        title: const Text('选择词典'),
-        children: [
-          for (final d in dicts)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(c, d),
-              child: Text(d.name),
-            ),
-        ],
-      ),
-    );
-    if (dict == null || !mounted) return;
-
-    // 输入起止单词（前闭后闭）
-    final range = await showDialog<List<String>>(
-      context: context,
-      builder: (c) {
-        final fromCtrl = TextEditingController();
-        final toCtrl = TextEditingController();
-        return AlertDialog(
-          title: Text('从「${dict.name}」导入到「$bookName」'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: fromCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                    labelText: '起始单词',
-                    hintText: '如 abandon',
-                    border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: toCtrl,
-                decoration: const InputDecoration(
-                    labelText: '结束单词',
-                    hintText: '如 academy',
-                    border: OutlineInputBorder()),
-                onSubmitted: (_) =>
-                    Navigator.pop(c, [fromCtrl.text.trim(), toCtrl.text.trim()]),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c), child: const Text('取消')),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(c, [fromCtrl.text.trim(), toCtrl.text.trim()]),
-              child: const Text('导入')),
-          ],
-        );
-      },
-    );
-    if (range == null || range.length < 2 || !mounted) return;
-    final from = range[0].toLowerCase(), to = range[1].toLowerCase();
-    if (from.isEmpty || to.isEmpty) {
-      _showSnack('起止单词不能为空');
-      return;
-    }
-    final n = await widget._wordbookDb.importRange(dict, from, to, bookId: bookId);
+  Future<void> _importFromDict(Wordbook b) async {
+    final n = await importFromDictDialog(
+        context, widget._wordbookDb, b.id, b.name);
     if (!mounted) return;
-    _showSnack(n > 0 ? '已导入 $n 个新单词' : '范围内没有新单词（可能已全部存在）');
-    _load();
+    if (n > 0) {
+      _showSnack('已导入 $n 个新单词');
+      _load();
+    } else if (n == 0) {
+      _showSnack('范围内没有新单词（可能已全部存在）');
+    }
   }
 
   // ---------- 长按菜单 ----------
@@ -212,7 +138,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
               title: Text('从词典导入到「${b.name}」'),
               onTap: () {
                 Navigator.pop(c);
-                _importFromDict(b.id, b.name);
+                _importFromDict(b);
               },
             ),
             ListTile(
@@ -265,12 +191,19 @@ class _WordbookListPageState extends State<WordbookListPage> {
                         return false; // 删除由对话框内决定，滑动本身不删除
                       },
                       child: ListTile(
-                        leading: const Icon(Icons.menu_book),
+                        // ★ 左侧：复习按钮（替代原 menu_book 图标）
+                        leading: IconButton(
+                          icon: const Icon(Icons.school),
+                          color: Theme.of(context).colorScheme.primary,
+                          tooltip: '复习「${b.name}」',
+                          onPressed: b.wordCount > 0
+                              ? () => _startReview(b)
+                              : null,
+                        ),
                         title: Text(b.name),
                         subtitle: Text('${b.wordCount} 个单词'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () async {
-                          // ★ 核对：词条列表页的实际类名/参数名，按你项目里的改
                           await Navigator.push(
                             context,
                             MaterialPageRoute(

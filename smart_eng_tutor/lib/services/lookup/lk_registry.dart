@@ -22,7 +22,9 @@ class DictionaryRegistry {
     }
     return null;
   }
-  /// 按词典 ID 取实现；dictId 为空/未注册（如 0=读文章收藏）时回退内置词典。
+  /// 按词典 ID 取实现；dictId 为空或未注册时回退第一个注册的词典（内置）。
+  /// 注意：dictId=0 的词条也会拿到内置词典，若需"按显示设置查全部"
+  /// 请走 WordLookup.lookupEntry(word, dictId)。
   Dictionary implFor(int? dictId) =>
       dictId == null ? _dicts.first : (byId(dictId) ?? _dicts.first);
 

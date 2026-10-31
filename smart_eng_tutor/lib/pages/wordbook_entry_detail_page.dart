@@ -124,7 +124,10 @@ class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _reviewBadge(),
+            WordContentView(word: widget.entry.word, sections: _sections),
+            // ★ 相关词汇：显示在释义下方
             if (_related.isNotEmpty) ...[
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 children: [
@@ -135,9 +138,7 @@ class _WordbookEntryDetailPageState extends State<WordbookEntryDetailPage> {
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
             ],
-            WordContentView(word: widget.entry.word, sections: _sections),
           ],
         ),
       ),

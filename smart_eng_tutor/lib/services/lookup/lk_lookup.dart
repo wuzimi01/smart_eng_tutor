@@ -21,11 +21,12 @@ class WordLookup {
     final stems = await _mainDict!.queryStems(word);
     final unique = <String>{word, ...stems}.toList();
     for (final c in unique) {
-      final r = await _queryAll(c);
+      final r = await _queryAll(c, extraChips: unique); // ★ 词根变体作为 chips
       if (r != null) return r;
     }
     return const LookupResult(chips: [], displayText: '未找到释义');
   }
+
 
   /// 指定词查询：首页切 chip、词库详情页共用
   Future<LookupResult> select(String word) async {
@@ -38,10 +39,14 @@ class WordLookup {
         );
   }
 
-  /// 词条详情：只用该词条来源词典查，忽略显示设置。
-  /// 与查词共用 section 构建与相关单词逻辑。
+  /// 词条详情：
+  /// - dictId 有效（>0）→ 只用该词条来源词典查，忽略显示设置；
+  /// - dictId 为 0/null → 按当前显示设置查全部词典（与首页搜索一致）。
   Future<LookupResult?> lookupEntry(String word, int? dictId) async {
-    final dict = registry.byId(dictId ?? 1) ?? registry.byId(1);
+    if (dictId == null || dictId <= 0) {
+      return _queryAll(word);
+    }
+    final dict = registry.byId(dictId);
     if (dict == null) return null;
     final sections = await dict.query(word);
     if (sections.isEmpty) return null;
@@ -55,6 +60,7 @@ class WordLookup {
     );
   }
 
+
   /// 词组（含空格）→ 相关单词 = 首词
   static List<String> relatedWords(String word) {
     final w = word.trim();
@@ -63,7 +69,8 @@ class WordLookup {
     return first.isEmpty ? const [] : [first];
   }
 
-  Future<LookupResult?> _queryAll(String word) async {
+  Future<LookupResult?> _queryAll(String word,
+      {List<String>? extraChips}) async {
     final visible = <ResultSection>[];
     for (final dict in registry.all) {
       final caps = dict.getCapabilities();
@@ -76,14 +83,23 @@ class WordLookup {
     }
     if (visible.isEmpty) return null;
     visible.sort((a, b) => (a.sortHint ?? 0).compareTo(b.sortHint ?? 0));
+
+    // ★ chips = 词根变体（去重，词组时附加首词）
+    final chips = <String>{
+      word,
+      ...?extraChips,
+      ...relatedWords(word),
+    }.toList();
+
     return LookupResult(
-      chips: relatedWords(word), // ★ 词组命中时给相关单词 chip
+      chips: chips,
       selected: word,
       displayText: _displayFromSections(visible) ?? '（无显示内容）',
       tags: _tagsFromSections(visible),
       sections: visible,
     );
   }
+
 
   String? _displayFromSections(List<ResultSection> sections) {
     final buf = StringBuffer();

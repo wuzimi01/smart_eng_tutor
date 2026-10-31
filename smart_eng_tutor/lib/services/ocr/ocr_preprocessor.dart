@@ -35,7 +35,7 @@ class ImageProcessor {
     //   );
     // }
 
-    // ---- 3. 去红笔批改：红笔像素置白 ----
+    // ---- 3. 去红笔蓝笔批改：红蓝笔像素置白 ----
     image = _removeMarks(image, red: true, blue: true);
 
     // ---- 4. 灰度 + 对比度增强 ----
