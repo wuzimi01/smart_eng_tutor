@@ -4,7 +4,7 @@ import 'package:smart_eng_tutor/pages/wordbook_entry_detail_page.dart';
 import 'package:smart_eng_tutor/services/wordbook/wb_database.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_registry.dart';
 import 'package:smart_eng_tutor/pages/widgets/inline_text.dart';
-
+import 'package:smart_eng_tutor/services/wordbook/wb_actions.dart';
 /// 词条列表页（点击词条 → 释义详情；长按进入批量选择模式）
 class WordbookEntryListPage extends StatefulWidget {
   final WordbookDatabase _wordbookDb;
@@ -27,7 +27,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
   bool _selectMode = false;
   final Set<int> _selectedIds = {}; // 存 entry.id
 
-  /// entry.id → 释义摘要（来源词典第一张卡片的 zh，含 ^/* 标记，富文本渲染）
+  /// entry.id → 释义摘要（来源词典第一张卡片的 zh，含 ^/$ 标记，富文本渲染）
   final Map<int, String> _translations = {};
 
   List<WordbookEntry> get _selectedEntries =>
@@ -185,7 +185,7 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
                               child: Text(e.word,
                                   style: const TextStyle(fontSize: 18)),
                             ),
-                            // ★ 右对齐释义（富文本，渲染 ^加粗^ / *下划线*）
+                            // ★ 右对齐释义（富文本，渲染 ^加粗^ / $下划线$）
                             if (!_selectMode &&
                                 zh != null &&
                                 zh.isNotEmpty) ...[
@@ -236,15 +236,30 @@ class _WordbookEntryListPageState extends State<WordbookEntryListPage> {
       title: Text(widget.bookName),
       actions: [
         IconButton(
-          icon: const Icon(Icons.checklist),
-          tooltip: '批量操作',
+          icon: const Icon(Icons.school),
+          tooltip: '复习',
           onPressed: _entries.isEmpty
               ? null
-              : () => setState(() => _selectMode = true),
+              : () => startBookReview(
+                  context, widget._wordbookDb, widget.bookId, widget.bookName,
+                  onFinish: _load),
+        ),
+        IconButton(
+          icon: const Icon(Icons.file_upload_outlined),
+          tooltip: '导入',
+          onPressed: () => importFromDictWithFeedback(
+              context, widget._wordbookDb, widget.bookId, widget.bookName,
+              onDone: _load),
+        ),
+        IconButton(
+          icon: const Icon(Icons.checklist),
+          tooltip: '批量操作',
+          onPressed: _entries.isEmpty ? null : () => setState(() => _selectMode = true),
         ),
       ],
     );
   }
+
 
   PreferredSizeWidget _buildSelectAppBar() {
     return AppBar(

@@ -74,7 +74,7 @@ class CompleteGuideDict extends Dictionary {
     try {
       // ① head 精确匹配（word 字段也剥标记比较，双保险）
       final head = await _db!.query('words',
-          where: "REPLACE(REPLACE(word,'^',''),'*','') = ?",
+          where: "REPLACE(REPLACE(word,'^',''),'\$','') = ?",
           whereArgs: [w], limit: 1);
       if (head.isNotEmpty) {
         final rows = await _db!.query('items',
@@ -84,7 +84,7 @@ class CompleteGuideDict extends Dictionary {
       }
       // ② 词块英文精确匹配
       final item = await _db!.query('items',
-          where: "REPLACE(REPLACE(eng,'^',''),'*','') = ?",
+          where: "REPLACE(REPLACE(eng,'^',''),'\$','') = ?",
           whereArgs: [w], limit: 1);
       if (item.isNotEmpty) {
         final rows = await _db!.query('items',
@@ -178,8 +178,10 @@ class CompleteGuideDict extends Dictionary {
     final eng = ((r['eng'] as String?) ?? '').trim();
     final zh = ((r['zh'] as String?) ?? '').trim();
     if (eng.isEmpty && zh.isEmpty) return;
+    final optional = (r['optional'] as int? ?? 0) == 1; // ★ 新增
     final indent = ' ' * max(0, depthBelowBase - 1).clamp(0, 4);
     final text = StringBuffer(indent);
+    if (optional) text.write('*'); // ★ 新增：选背标记
     if (eng.isNotEmpty) text.write(eng);
     if (zh.isNotEmpty) text.write(eng.isNotEmpty ? ' $zh' : zh);
     sections.add(ResultSection(
@@ -250,7 +252,7 @@ class CompleteGuideDict extends Dictionary {
     try {
       // ① head 精确匹配（word 字段也剥标记比较，双保险）
       final head = await _db!.query('words',
-          where: "REPLACE(REPLACE(word,'^',''),'*','') = ?",
+          where: "REPLACE(REPLACE(word,'^',''),'\$','') = ?",
           whereArgs: [w], limit: 1);
       List<Map<String, Object?>> rows = const [];
       if (head.isNotEmpty) {
@@ -260,7 +262,7 @@ class CompleteGuideDict extends Dictionary {
       } else {
         // ② 词块英文精确匹配
         final item = await _db!.query('items',
-            where: "REPLACE(REPLACE(eng,'^',''),'*','') = ?",
+            where: "REPLACE(REPLACE(eng,'^',''),'\$','') = ?",
             whereArgs: [w], limit: 1);
         if (item.isEmpty) return const [];
         rows = await _db!.query('items',
@@ -271,7 +273,12 @@ class CompleteGuideDict extends Dictionary {
         final eng = ((it['eng'] as String?) ?? '').trim();
         final zh = ((it['zh'] as String?) ?? '').trim();
         if (eng.isEmpty || zh.isEmpty) return const [];
-        cards.add(ReviewCard(eng: eng, zh: zh, importance: _impChunk));
+        final optional = (it['optional'] as int? ?? 0) == 1; // ★ 新增
+        cards.add(ReviewCard(
+          eng: optional ? '*$eng' : eng, // ★ 前缀 *
+          zh: zh,
+          importance: _impChunk,
+        ));
         // 词块的下级内容也做卡
         final lv = it['level'] as int;
         final sub = <Map<String, Object?>>[];
@@ -310,8 +317,14 @@ class CompleteGuideDict extends Dictionary {
       final eng = ((r['eng'] as String?) ?? '').trim();
       final zh = ((r['zh'] as String?) ?? '').trim();
       if (eng.isEmpty || zh.isEmpty) continue;
-      cards.add(ReviewCard(eng: eng, zh: zh, importance: imp));
+      final optional = (r['optional'] as int? ?? 0) == 1; // ★ 新增
+      cards.add(ReviewCard(
+        eng: optional ? '*$eng' : eng, // ★ 前缀 *
+        zh: zh,
+        importance: imp,
+      ));
     }
+
   }
 
   @override
@@ -321,7 +334,7 @@ class CompleteGuideDict extends Dictionary {
     try {
       // 词块 → 它所属的 head；head 本身 → 返回空（没有上级）
       final byEng = await _db!.query('items', columns: ['headId'],
-          where: "REPLACE(REPLACE(eng,'^',''),'*','') = ?",
+          where: "REPLACE(REPLACE(eng,'^',''),'\$','') = ?",
           whereArgs: [w], limit: 1);
       if (byEng.isEmpty) return const []; // word 本身就是 head，无上级
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:smart_eng_tutor/services/lookup/lk_models.dart';
 import 'package:smart_eng_tutor/services/lookup/lk_display_settings.dart';
+import 'package:smart_eng_tutor/pages/widgets/inline_text.dart';
 
 
 /// 通用词典结果渲染：按设置过滤，按类型排版；未知类型忽略。
@@ -133,8 +134,6 @@ class _TranslationView extends StatelessWidget {
   final TranslationData data;
   const _TranslationView(this.data);
 
-  static final _markRe = RegExp(r'(\^([^\^]+)\^|\*([^*]+)\*)');
-
   @override
   Widget build(BuildContext context) {
     const base = TextStyle(fontSize: 18, height: 1.6);
@@ -145,30 +144,13 @@ class _TranslationView extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text.rich(
-              TextSpan(children: _spans(line, base)),
+              TextSpan(children: parseInline(line, base: base)),
               style: base,
             ),
           ),
       ],
     );
   }
-
-  List<InlineSpan> _spans(String line, TextStyle base) {
-    final spans = <InlineSpan>[];
-    var last = 0;
-    for (final m in _markRe.allMatches(line)) {
-      if (m.start > last) spans.add(TextSpan(text: line.substring(last, m.start)));
-      if (m.group(2) != null) {
-        // ^…^ → 加粗
-        spans.add(TextSpan(text: m.group(2), style: const TextStyle(fontWeight: FontWeight.bold)));
-      } else {
-        // *…* → 下划线
-        spans.add(TextSpan(text: m.group(3), style: const TextStyle(decoration: TextDecoration.underline)));
-      }
-      last = m.end;
-    }
-    if (last < line.length) spans.add(TextSpan(text: line.substring(last)));
-    return spans;
-  }
 }
+
 

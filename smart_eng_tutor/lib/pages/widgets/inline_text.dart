@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// 解析行内标记：^文本^ = 加粗，*文本* = 下划线。
+/// 解析行内标记：^文本^ = 加粗，$文本$ = 下划线。
 /// 所有显示词条文本的地方统一走这里，避免漏码显示原文。
 List<InlineSpan> parseInline(String text, {TextStyle? base}) {
   final spans = <InlineSpan>[];
-  final reg = RegExp(r'\^([^\^]+)\^|\*([^*]+)\*');
+  final reg = RegExp(r'\^([^\^]+)\^|\$([^\$]+)\$');
   int last = 0;
   for (final m in reg.allMatches(text)) {
     if (m.start > last) {

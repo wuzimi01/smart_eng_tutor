@@ -103,28 +103,6 @@ class _WordbookListPageState extends State<WordbookListPage> {
     _load();
   }
 
-  // ---------- 复习（针对某个词库）----------
-  Future<void> _startReview(Wordbook b) async {
-    await startBookReview(context, widget._wordbookDb, b.id, b.name,
-        onFinish: () {
-      _showSnack('复习完成，成绩已记录');
-      _load();
-    });
-  }
-
-  // ---------- 从词典批量导入 ----------
-  Future<void> _importFromDict(Wordbook b) async {
-    final n = await importFromDictDialog(
-        context, widget._wordbookDb, b.id, b.name);
-    if (!mounted) return;
-    if (n > 0) {
-      _showSnack('已导入 $n 个新单词');
-      _load();
-    } else if (n == 0) {
-      _showSnack('范围内没有新单词（可能已全部存在）');
-    }
-  }
-
   // ---------- 长按菜单 ----------
   void _showBookMenu(Wordbook b) {
     showModalBottomSheet(
@@ -138,7 +116,9 @@ class _WordbookListPageState extends State<WordbookListPage> {
               title: Text('从词典导入到「${b.name}」'),
               onTap: () {
                 Navigator.pop(c);
-                _importFromDict(b);
+                importFromDictWithFeedback(
+                    context, widget._wordbookDb, b.id, b.name,
+                    onDone: _load);
               },
             ),
             ListTile(
@@ -146,7 +126,8 @@ class _WordbookListPageState extends State<WordbookListPage> {
               title: Text('复习「${b.name}」'),
               onTap: () {
                 Navigator.pop(c);
-                _startReview(b);
+                startBookReview(
+                    context, widget._wordbookDb, b.id, b.name, onFinish: _load);
               },
             ),
           ],
@@ -154,6 +135,7 @@ class _WordbookListPageState extends State<WordbookListPage> {
       ),
     );
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -197,7 +179,8 @@ class _WordbookListPageState extends State<WordbookListPage> {
                           color: Theme.of(context).colorScheme.primary,
                           tooltip: '复习「${b.name}」',
                           onPressed: b.wordCount > 0
-                              ? () => _startReview(b)
+                              ? () => startBookReview(
+                                  context, widget._wordbookDb, b.id, b.name, onFinish: _load)
                               : null,
                         ),
                         title: Text(b.name),
